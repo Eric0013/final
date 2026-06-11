@@ -5,132 +5,155 @@ import requests
 
 app = Flask(__name__)
 
-# v3.8 Dynamic UX Overhaul：首頁超大置中搜尋框 + 搜尋後動態上移
+# v3.9 Ultima Edition：完美還原截圖的置中大搜尋框、紫色極光漸層與一體化動態上移面板
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手 v3.8</title>
+    <title>AI 股神助手 v3.9</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
         body { 
-            background: linear-gradient(135deg, #0f0f1a, #1a1a2e); 
+            background: linear-gradient(135deg, #09090e, #120c1f, #1a102f); 
             min-height: 100vh; 
             color: #f4f4f7; 
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
             overflow-x: hidden;
+            padding-bottom: 50px;
         }
         
-        /* 初始狀態：中間大搜尋框的容器 */
-        .search-hero-container {
+        /* 💡 核心動態：一體化大容器，負責處理置中到頂部的優雅轉場 */
+        .main-wrapper {
+            min-height: 85vh;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            min-height: 70vh;
-            transition: all 0.5s ease-in-out;
+            transition: all 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+            width: 100%;
         }
         
-        /* 當搜尋後，這個 class 會被加到容器上，讓它一秒變頂部橫條 */
-        .search-hero-container.searched {
+        /* 當開始搜尋後，大容器一秒收縮成頂部橫條 */
+        .main-wrapper.searched {
             min-height: auto;
-            flex-direction: row;
+            justify-content: flex-start;
+            align-items: stretch;
+            padding-top: 20px;
+        }
+
+        /* 標題與版本號 */
+        .hero-header {
+            text-align: center;
+            margin-bottom: 2rem;
+            transition: all 0.6s ease;
+        }
+        .main-wrapper.searched .hero-header {
+            text-align: left;
+            margin-bottom: 1rem;
+            display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 15px 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            margin-bottom: 1.5rem !important;
+            padding-bottom: 15px;
         }
 
         .hero-title {
             font-size: 2.5rem;
             font-weight: bold;
-            margin-bottom: 1.5rem;
-            transition: all 0.5s ease-in-out;
-            text-shadow: 0 0 20px rgba(168, 85, 247, 0.2);
+            text-shadow: 0 0 25px rgba(168, 85, 247, 0.3);
+            margin: 0;
         }
-        .search-hero-container.searched .hero-title {
-            font-size: 1.5rem;
-            margin-bottom: 0;
+        .main-wrapper.searched .hero-title {
+            font-size: 1.6rem;
         }
 
-        /* 初始超大搜尋框樣式 */
-        .search-box-wrapper {
-            width: 100%;
-            max-width: 600px;
-            transition: all 0.5s ease-in-out;
+        .version-badge {
+            font-size: 1rem;
+            color: #a855f7;
+            font-weight: normal;
         }
-        .search-hero-container.searched .search-box-wrapper {
+
+        /* 搜尋框區塊 */
+        .search-container {
+            width: 100%;
+            max-width: 650px;
+            transition: all 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+        .main-wrapper.searched .search-container {
             max-width: 450px;
+            margin: 0 !important;
         }
 
         .form-control-custom {
-            background-color: #1a1a30;
+            background-color: rgba(26, 26, 48, 0.8);
             border: 1px solid #3d3d66;
             color: #fff;
-            padding: 12px 20px;
+            padding: 14px 22px;
             font-size: 1.1rem;
-            border-radius: 8px;
+            border-radius: 10px;
+            backdrop-filter: blur(5px);
             transition: all 0.3s;
         }
-        .search-hero-container.searched .form-control-custom {
-            padding: 8px 15px;
+        .main-wrapper.searched .form-control-custom {
+            padding: 9px 18px;
             font-size: 1rem;
-            border-radius: 6px;
+            border-radius: 7px;
         }
         .form-control-custom:focus {
             background-color: #1a1a30;
             color: #fff;
-            border-color: #a855f7;
-            box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+            border-color: #c084fc;
+            box-shadow: 0 0 18px rgba(192, 132, 252, 0.5);
         }
 
         .btn-custom {
             background: #ffffff;
-            color: #10101c;
+            color: #0f0f1a;
             font-weight: bold;
             border: none;
-            border-radius: 8px;
-            padding: 12px 30px;
+            border-radius: 10px;
+            padding: 14px 32px;
             font-size: 1.1rem;
             transition: all 0.2s;
         }
-        .search-hero-container.searched .btn-custom {
-            padding: 8px 24px;
+        .main-wrapper.searched .btn-custom {
+            padding: 9px 24px;
             font-size: 1rem;
-            border-radius: 6px;
+            border-radius: 7px;
         }
         .btn-custom:hover {
-            background: #e2e8f0;
+            background: #f1f5f9;
             transform: translateY(-1px);
         }
 
-        /* 雙圖表左右排版 */
+        /* 📊 左右雙圖表佈局一體化面板 */
         .charts-wrapper {
             display: grid;
             grid-template-columns: 68% 30%;
             gap: 2%;
-            background: #151526;
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid #252542;
+            background: rgba(21, 21, 38, 0.7);
+            padding: 22px;
+            border-radius: 14px;
+            border: 1px solid rgba(61, 61, 102, 0.4);
+            backdrop-filter: blur(10px);
         }
         .chart-box {
-            background: #111122;
-            border-radius: 8px;
-            padding: 10px;
-            border: 1px solid #1f1f38;
+            background: #0b0b14;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #1c1c30;
         }
         
-        /* 下方策略報告面板 */
+        /* 📋 下方策略分析報告一體化面板 */
         .card-custom { 
-            background: #151526; 
-            border: 1px solid #252542; 
-            border-radius: 12px; 
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            background: rgba(21, 21, 38, 0.7);
+            border: 1px solid rgba(61, 61, 102, 0.4);
+            border-radius: 14px; 
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
         }
         .report-grid {
             display: grid;
@@ -141,7 +164,7 @@ HTML_TEMPLATE = '''
         .masters-list {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px 24px;
+            gap: 14px 28px;
         }
         .suggestion-box {
             border-radius: 12px;
@@ -151,22 +174,27 @@ HTML_TEMPLATE = '''
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            box-shadow: 0 0 20px rgba(16, 185, 129, 0.05);
         }
-        hr { border-color: rgba(255, 255, 255, 0.1); }
+        hr { border-color: rgba(255, 255, 255, 0.12); }
     </style>
 </head>
 <body>
     <div class="container">
         
-        <div id="heroContainer" class="search-hero-container my-4">
-            <div class="hero-title" id="mainTitle">📈 AI 股神助手</div>
-            <div class="search-box-wrapper">
+        <div id="mainWrapper" class="main-wrapper">
+            
+            <div class="hero-header w-100" id="headerNode">
+                <h1 class="hero-title" id="appTitle">📈 AI 股神助手</h1>
+                <div class="version-badge mt-2" id="versionNode">動態 10日 K線/KD 量化分析面板 <span class="badge bg-dark text-secondary">v3.9</span></div>
+            </div>
+
+            <div class="search-container mb-4" id="searchNode">
                 <form id="stockForm" class="d-flex gap-2 w-100">
                     <input type="text" class="form-control form-control-custom w-100" id="symbol" placeholder="例如：2330.TW 或 NVDA" required>
                     <button class="btn btn-custom text-nowrap" type="submit">開始分析</button>
                 </form>
             </div>
+            
         </div>
 
         <div id="outputSection" style="display: none;">
@@ -182,7 +210,7 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
             
-            <div class="card-custom p-4 mb-5">
+            <div class="card-custom p-4">
                 <h5 class="mb-4 text-white">📋 策略分析報告</h5>
                 <div id="resultContent"></div>
             </div>
@@ -197,17 +225,26 @@ HTML_TEMPLATE = '''
         document.getElementById('stockForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-            const heroContainer = document.getElementById('heroContainer');
-            const mainTitle = document.getElementById('mainTitle');
+            
+            const mainWrapper = document.getElementById('mainWrapper');
+            const appTitle = document.getElementById('appTitle');
+            const headerNode = document.getElementById('headerNode');
+            const searchNode = document.getElementById('searchNode');
+            
             const outputSection = document.getElementById('outputSection');
             const resultContent = document.getElementById('resultContent');
             const klineChartDiv = document.getElementById('klineChart');
             const kdChartDiv = document.getElementById('kdChart');
             
-            // 💡 核心動態效果：將搜尋框容器秒切成頂部橫條，並拉出報告區域
-            heroContainer.classList.add('searched');
-            outputSection.style.display = 'block';
+            // 💡 觸發完美變身：首頁置中框一體化上移
+            mainWrapper.classList.add('searched');
+            // 將搜尋框塞進頂部 Header 右側，達成跟截圖一模一樣的左右對稱佈局
+            if(!headerNode.classList.contains('setup-done')) {
+                headerNode.appendChild(searchNode);
+                headerNode.classList.add('setup-done');
+            }
             
+            outputSection.style.display = 'block';
             resultContent.innerHTML = '<p class="text-muted">🔄 正在計算量化核心指標與大師策略審查...</p>';
             klineChartDiv.innerHTML = '<p class="text-center text-muted py-5">載入中...</p>';
             kdChartDiv.innerHTML = '<p class="text-center text-muted py-5">載入中...</p>';
@@ -225,8 +262,9 @@ HTML_TEMPLATE = '''
                     return;
                 }
 
-                // 更新頂部動態 Title
-                mainTitle.innerHTML = `📈 AI 股神助手 <span class="text-secondary fs-5">| ${data.stock_fullname} 技術趨勢圖 (近10日)</span>`;
+                // 抬頭同步改寫為截圖樣式
+                appTitle.innerHTML = `📈 AI 股神助手 <span class="text-secondary fs-5">v3.9 | ${data.stock_fullname} 技術趨勢圖 (近10日)</span>`;
+                document.getElementById('versionNode').style.display = 'none';
 
                 // 渲染大師對齊報告
                 resultContent.innerHTML = data.report;
@@ -240,33 +278,33 @@ HTML_TEMPLATE = '''
                 const kData = data.k_data.map(item => ({ x: item.time, y: item.k }));
                 const dData = data.k_data.map(item => ({ x: item.time, y: item.d }));
 
-                // 左圖：K線與均線
+                // ➡️ 【左圖】K線與 EMA 均線
                 const klineOptions = {
                     series: [
                         { name: 'K線價', type: 'candlestick', data: candlestickData },
                         { name: 'EMA20趨勢線', type: 'line', data: emaData }
                     ],
-                    chart: { type: 'line', height: 380, background: '#111122', foreColor: '#8e8eaf', toolbar: { show: false } },
+                    chart: { type: 'line', height: 380, background: '#0b0b14', foreColor: '#8e8eaf', toolbar: { show: false } },
                     xaxis: { type: 'datetime', labels: { datetimeUTC: true, format: 'MM月dd日' } },
                     yaxis: { decimalsInFloat: 2, labels: { style: { colors: '#8e8eaf' } } },
                     stroke: { width: [1, 2.5] },
                     colors: ['#ef5350', '#ff9800'],
-                    grid: { borderColor: '#1f1f38' },
+                    grid: { borderColor: '#1c1c30' },
                     plotOptions: { candlestick: { colors: { upward: '#ef5350', downward: '#26a69a' }, wick: { useFillColor: true } } }
                 };
 
-                // 右圖：KD線
+                // ➡️ 【右圖】獨立 KD 指標線
                 const kdOptions = {
                     series: [
                         { name: 'K線 (KD)', data: kData },
                         { name: 'D線 (KD)', data: dData }
                     ],
-                    chart: { type: 'line', height: 380, background: '#111122', foreColor: '#8e8eaf', toolbar: { show: false } },
+                    chart: { type: 'line', height: 380, background: '#0b0b14', foreColor: '#8e8eaf', toolbar: { show: false } },
                     xaxis: { type: 'datetime', labels: { datetimeUTC: true, format: 'MM月dd日' } },
                     yaxis: { max: 100, min: 0, tickAmount: 4, labels: { style: { colors: '#8e8eaf' } } },
                     stroke: { width: [2, 2], curve: 'smooth', dashArray: [0, 4] },
                     colors: ['#00b0ff', '#ffea00'],
-                    grid: { borderColor: '#1f1f38' },
+                    grid: { borderColor: '#1c1c30' },
                     annotations: {
                         yaxis: [
                             { y: 80, borderColor: '#ef5350', strokeDashArray: 3, label: { text: '(Overbought)', style: { color: '#ef5350', background: 'transparent' } } },
@@ -288,7 +326,7 @@ HTML_TEMPLATE = '''
                 kdChartInstance.render();
 
             } catch (err) {
-                resultContent.innerHTML = `<h4 class="text-danger">錯誤</h4><p>技術面渲染封包異常，請重試。</p>`;
+                resultContent.innerHTML = `<h4 class="text-danger">錯誤</h4><p>量化技術面渲染異常，請重試。</p>`;
             }
         });
     </script>
@@ -317,7 +355,6 @@ def calculate_backend_kd(df_close, df_high, df_low, period=9):
         d_vals.append(next_d)
     return k_vals, d_vals
 
-# ==================== 量化策略運算核心 ====================
 def get_stock_analysis_data(symbol):
     try:
         api_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
@@ -337,18 +374,14 @@ def get_stock_analysis_data(symbol):
         for i in range(len(timestamps)):
             if quotes['open'][i] is not None and adj_close[i] is not None:
                 parsed_data.append({
-                    'time': int(timestamps[i] * 1000),
-                    'Open': float(quotes['open'][i]),
-                    'High': float(quotes['high'][i]),
-                    'Low': float(quotes['low'][i]),
-                    'Close': float(adj_close[i])
+                    'time': int(timestamps[i] * 1000), 'Open': float(quotes['open'][i]), 'High': float(quotes['high'][i]), 'Low': float(quotes['low'][i]), 'Close': float(adj_close[i])
                 })
         
         df = pd.DataFrame(parsed_data)
         if df.empty or len(df) < 200:
             return None, f"❌ 找不到股票代碼 「{symbol}」 或該股票歷史資料不足。", symbol
 
-        # 量化運算
+        # 量化核心計算
         delta = df['Close'].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -364,7 +397,7 @@ def get_stock_analysis_data(symbol):
         df['D'] = d_list
         df.dropna(inplace=True)
 
-        # 趨勢預測
+        # 趨勢線性外推
         tail_20 = df['Close'].tail(20).values
         slope, intercept = np.polyfit(np.arange(20), tail_20, 1)
         pred_raw = slope * 20 + intercept
@@ -373,14 +406,15 @@ def get_stock_analysis_data(symbol):
         current_price = float(df['Close'].iloc[-1])
         change_pct = float(((pred_price - current_price) / current_price) * 100.0)
 
-        # 大師判斷
         buffett = current_price < float(df['SMA_200'].iloc[-1]) * 1.15
         livermore = (current_price > float(df['EMA_20'].iloc[-1])) and (change_pct > 0.0)
         lynch = 50.0 < float(df['RSI'].iloc[-1]) < 75.0
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 雙欄高質感 HTML 報告
+        recommendation = sum([buffett, livermore, lynch, wood, simons])
+
+        # 下方大師報告雙欄對齊架構
         report = f"""
         <div class="row mb-3">
             <div class="col-sm-6 text-secondary">💰 當前價格：<span class="text-white fw-bold fs-5">{current_price:.2f} {currency}</span></div>
@@ -393,25 +427,25 @@ def get_stock_analysis_data(symbol):
             <div>
                 <h6 class="fw-bold text-secondary mb-3">💡 五大名師看法</h6>
                 <div class="masters-list">
-                    <div>👴 巴菲特：<span style="color:{'#ef5350' if buffett else '#26a69a'}; font-weight:bold;">{'✅ 價格合理' if buffett else '❌ 價格太貴'}</span></div>
-                    <div>👓 彼得・林區：<span style="color:{'#ef5350' if lynch else '#26a69a'}; font-weight:bold;">{'✅ 動能強勁' if lynch else '❌ 進入整理'}</span></div>
-                    <div>🎩 李佛摩：<span style="color:{'#ef5350' if livermore else '#26a69a'}; font-weight:bold;">{'✅ 趨勢向上' if livermore else '❌ 趨勢不明'}</span></div>
-                    <div>🚀 凱薩琳・伍德：<span style="color:{'#ef5350' if wood else '#26a69a'}; font-weight:bold;">{'✅ 具爆發力' if wood else '❌ 成長緩慢'}</span></div>
-                    <div>💻 西蒙斯：<span style="color:{'#ef5350' if simons else '#26a69a'}; font-weight:bold;">{'✅ 數據勝率高' if simons else '❌ 數據勝率低'}</span></div>
+                    <div>👴 巴菲特：<span style="color:{'#26a69a' if buffett else '#ef5350'}; font-weight:bold;">{'✅ 價格合理' if buffett else '❌ 價格太貴'}</span></div>
+                    <div>👓 彼得・林區：<span style="color:{'#26a69a' if lynch else '#ef5350'}; font-weight:bold;">{'✅ 動能強勁' if lynch else '❌ 進入整理'}</span></div>
+                    <div>🎩 李佛摩：<span style="color:{'#26a69a' if livermore else '#ef5350'}; font-weight:bold;">{'✅ 趨勢向上' if livermore else '❌ 趨勢不明'}</span></div>
+                    <div>🚀 凱薩琳・伍德：<span style="color:{'#26a69a' if wood else '#ef5350'}; font-weight:bold;">{'✅ 具爆發力' if wood else '❌ 成長緩慢'}</span></div>
+                    <div>💻 西蒙斯：<span style="color:{'#26a69a' if simons else '#ef5350'}; font-weight:bold;">{'✅ 數據勝率高' if simons else '❌ 數據勝率低'}</span></div>
                 </div>
             </div>
             
-            <div class="suggestion-box" style="background:{'rgba(239,83,80,0.05)' if recommendation >=4 else ('rgba(26,166,154,0.05)' if recommendation==3 else 'rgba(142,142,175,0.05)')}; border: 1px solid {'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#3d3d66')};">
+            <div class="suggestion-box" style="background:{'rgba(239,83,80,0.06)' if recommendation >=4 else ('rgba(38,166,154,0.06)' if recommendation==3 else 'rgba(142,142,175,0.06)')}; border: 1px solid {'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#3d3d66')};">
                 <div class="text-secondary small mb-1">💡 綜合建議</div>
                 <div class="fs-4 fw-bold text-white mb-2">{recommendation}/5 位大師看好</div>
                 <div class="fs-5 fw-bold" style="color:{'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#8e8eaf')}">
-                    {'⚖️ 可以考慮分批進場' if recommendation == 3 else ('🔥 強力買入指標！' if recommendation >= 4 else '💤 建議繼續觀望')}
+                    {'⚖ * ⚖ 可以考慮分批進場' if recommendation == 3 else ('🔥 🔥 強力買入指標！' if recommendation >= 4 else '💤 建議繼續觀望')}
                 </div>
             </div>
         </div>
         """
 
-        # 切出精準 10 日交易日
+        # 精準切出最後10天
         chart_df = df.tail(10)
         k_data_list = []
         for _, row in chart_df.iterrows():
