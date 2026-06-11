@@ -6,20 +6,20 @@ import requests
 
 app = Flask(__name__)
 
-# 終極完美網頁範本：整合 TradingView 官方頂級動態 K 線圖
+# 單一檔案網頁範本 (整合 TradingView 趨勢線 + KD線)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手 + 專業互動K線</title>
+    <title>AI 股神助手 + KD趨勢圖</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background: linear-gradient(135deg, #1e1e2f, #2d1b4e); color: #f4f4f7; min-height: 100vh; }
         .card { background-color: #252538; border: none; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); color: #f4f4f7; }
         .result-box { background: #1e1e2f; border-radius: 12px; padding: 25px; border: 1px solid #3d3d5c; font-size: 1.15rem; line-height: 1.8; }
-        .chart-container { background: #1e1e2f; border-radius: 12px; padding: 10px; border: 1px solid #3d3d5c; min-height: 450px; position: relative; }
+        .chart-container { background: #1e1e2f; border-radius: 12px; padding: 10px; border: 1px solid #3d3d5c; min-height: 500px; position: relative; }
         .form-control { background-color: #151522; border: 1px solid #3d3d5c; color: #fff; }
         .form-control:focus { background-color: #151522; color: #fff; border-color: #667eea; box-shadow: none; }
         hr { border-color: #3d3d5c; }
@@ -33,12 +33,12 @@ HTML_TEMPLATE = '''
         </div>
 
         <div class="row justify-content-center">
-            <div class="col-md-9 col-lg-8">
+            <div class="col-md-10">
                 
                 <div class="card p-4 mb-4">
                     <form id="stockForm">
                         <div class="input-group input-group-lg">
-                            <input type="text" class="form-control" id="symbol" placeholder="例如：2330 或 NVDA (台股不用加.TW囉)" required>
+                            <input type="text" class="form-control" id="symbol" placeholder="例如：2330 或 NVDA (台股免加.TW)" required>
                             <button class="btn btn-primary px-5" type="submit" style="background: linear-gradient(to right, #667eea, #764ba2); border: none;">開始分析</button>
                         </div>
                     </form>
@@ -47,9 +47,9 @@ HTML_TEMPLATE = '''
                 <div id="outputSection" style="display: none;">
                     
                     <div class="card p-4 mb-4">
-                        <h5 class="mb-3 text-info">📊 專業技術 K 線圖 (可在圖表下方自由縮放切換至 10 天範圍)</h5>
+                        <h5 class="mb-3 text-info">📊 技術趨勢圖 (內建 EMA 趨勢線 與 KD 指標線)</h5>
                         <div class="chart-container">
-                            <div id="tradingview_chart" style="height: 430px;"></div>
+                            <div id="tradingview_chart" style="height: 480px;"></div>
                         </div>
                     </div>
                     
@@ -79,18 +79,17 @@ HTML_TEMPLATE = '''
             // 1. 自動校正股票代碼格式以適應 TradingView 官方命名空間
             let tvSymbol = symbolInput;
             if (/^\d+$/.test(symbolInput)) {
-                // 如果是純數字 (如 2330)，代表是台股，幫它加上台灣交易所前綴
-                tvSymbol = "TWSE:" + symbolInput;
+                tvSymbol = "TWSE:" + symbolInput; // 純數字自動判斷為台灣加權交易所股票
             }
 
-            // 2. 即時渲染 TradingView 頂級圖表組件 (完全繞過後端 IP 限制，100% 成功顯示)
+            // 2. 初始化 TradingView 趨勢圖 + 強制載入 MA (均線) 與 Stochastic (KD線)
             new TradingView.widget({
                 "autosize": true,
                 "symbol": tvSymbol,
                 "interval": "D",
                 "timezone": "Asia/Taipei",
                 "theme": "dark",
-                "style": "1", // 1 代表標準 K 線圖
+                "style": "1", // 1 代表專業 K 線型態趨勢圖
                 "locale": "zh_TW",
                 "toolbar_bg": "#1e1e2f",
                 "enable_publishing": false,
@@ -98,14 +97,13 @@ HTML_TEMPLATE = '''
                 "allow_symbol_change": false,
                 "container_id": "tradingview_chart",
                 "studies": [
-                    "RSI@tv-basicstudies",
-                    "MASimple@tv-basicstudies"
+                    "MASimple@tv-basicstudies",      // 在圖表主體疊加一條移動平均趨勢線
+                    "Stochastic@tv-basicstudies"     // 在圖表下方獨立新增 K/D 指標線區塊
                 ]
             });
 
             // 3. 向後端發送請求獲取文字報告
             try {
-                // 對於 yfinance 後端，如果是純數字則幫它補上 .TW 避免後端找不到
                 let backendSymbol = symbolInput;
                 if (/^\d+$/.test(symbolInput)) {
                     backendSymbol = symbolInput + ".TW";
@@ -120,8 +118,7 @@ HTML_TEMPLATE = '''
                 const data = await res.json();
                 
                 if (data.error) {
-                    // 如果 Vercel 海外主機真的被 Yahoo 封鎖了，文字報告會顯示保底備用提示，但不影響上方 K 線圖的運作！
-                    resultDiv.innerHTML = `<p class="text-warning">⚠️ 策略報告提示：${data.error}</p><p class="text-muted fs-6">註：由於 Vercel 雲端主機海外 IP 偶爾會遭到 Yahoo 財經限制，若文字報告更新較慢，請先參考上方 TradingView 提供的即時 10 日 K 線趨勢！</p>`;
+                    resultDiv.innerHTML = `<p class="text-warning">⚠️ 策略報告提示：${data.error}</p><p class="text-muted fs-6">註：若文字報告更新較慢，請優先參考上方 TradingView 提供的即時動態 K 棒、均線與下方 KD 線進行判斷！</p>`;
                     return;
                 }
 
@@ -155,7 +152,7 @@ def get_stock_analysis_report(symbol):
         df = yf.download(symbol, period="2y", auto_adjust=True, progress=False, session=session, threads=False)
         
         if df is None or df.empty or len(df) < 200:
-            return f"暫時無法連線至 Yahoo 財經獲取文字量化數據。請參考上方 K 線圖進行自主判斷。"
+            return f"暫時無法連線至 Yahoo 財經獲取文字量化數據。請參考上方 K 線與 KD 圖進行自主研判。"
 
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -212,7 +209,7 @@ def get_stock_analysis_report(symbol):
         return report
 
     except Exception as e:
-        return f"數據庫繁忙中，請優先查看上方即時動態圖表。"
+        return f"數據庫繁忙中，請優先查看上方即時動態趨勢圖表。"
 
 # ==================== 網站路由 ====================
 
