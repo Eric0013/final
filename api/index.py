@@ -6,7 +6,7 @@ import requests
 
 app = Flask(__name__)
 
-# 單一檔案網頁範本 (已整合 ApexCharts K線圖功能)
+# 單一檔案網頁範本
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -20,7 +20,7 @@ HTML_TEMPLATE = '''
         body { background: linear-gradient(135deg, #1e1e2f, #2d1b4e); color: #f4f4f7; min-height: 100vh; }
         .card { background-color: #252538; border: none; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); color: #f4f4f7; }
         .result-box { background: #1e1e2f; border-radius: 12px; padding: 25px; border: 1px solid #3d3d5c; }
-        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; }
+        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 400px; }
         .form-control { background-color: #151522; border: 1px solid #3d3d5c; color: #fff; }
         .form-control:focus { background-color: #151522; color: #fff; border-color: #764ba2; box-shadow: none; }
         hr { border-color: #3d3d5c; }
@@ -64,7 +64,7 @@ HTML_TEMPLATE = '''
     </div>
 
     <script>
-        let chartInstance = null; // 用來儲存圖表實例，避免重複渲染
+        let chartInstance = null;
 
         document.getElementById('stockForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -95,20 +95,19 @@ HTML_TEMPLATE = '''
                 // 1. 渲染文字報告
                 resultDiv.innerHTML = data.report;
 
-                # 取出後端傳來的 K 線 JSON 數據並重組格式
+                // 2. 解析後端傳來的 K 線 JSON 數據
                 const chartData = data.k_data.map(item => ({
                     x: new Date(item.date),
                     y: [item.open, item.high, item.low, item.close]
                 }));
 
-                // 2. 繪製或更新 ApexCharts K線圖
+                // 3. 繪製或更新 ApexCharts K線圖
                 const options = {
                     series: [{ data: chartData }],
                     chart: {
                         type: 'candlestick',
                         height: 400,
                         background: '#1e1e2f',
-                        theme: 'dark',
                         toolbar: { show: true }
                     },
                     xaxis: { type: 'datetime' },
@@ -116,15 +115,15 @@ HTML_TEMPLATE = '''
                     plotOptions: {
                         candlestick: {
                             colors: {
-                                upward: '#ef5350',  # 陽線改為台灣習慣的紅色 (美股預設是綠色，這裡配合台灣習慣)
-                                downward: '#26a69a' # 陰線改為綠色
+                                upward: '#ef5350',
+                                downward: '#26a69a'
                             }
                         }
                     }
                 };
 
                 if (chartInstance) {
-                    chartInstance.destroy(); # 如果原本有圖表，先銷毀舊的再畫新的
+                    chartInstance.destroy();
                 }
                 chartDiv.innerHTML = '';
                 chartInstance = new ApexCharts(chartDiv, options);
@@ -132,6 +131,7 @@ HTML_TEMPLATE = '''
 
             } catch (err) {
                 resultDiv.innerHTML = `<p class="text-danger">連線失敗: ${err}</p>`;
+                chartDiv.innerHTML = '<p class="text-center text-danger">無法連線到主機</p>';
             }
         });
     </script>
@@ -163,7 +163,7 @@ def get_stock_analysis_report(symbol):
             df.columns = df.columns.get_level_values(0)
         
         if df.empty or len(df) < 200:
-            return None, f"❌ 找不到股票代碼 {symbol} 或資料不足。"
+            return None, f"❌ 找不到股票代碼 {symbol} 或資料不足 (需至少200個交易日)"
 
         # 技術指標計算
         df['RSI'] = calculate_rsi(df['Close'], period=14)
