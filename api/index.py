@@ -5,6 +5,7 @@ import numpy as np
 
 app = Flask(__name__)
 
+# 單一檔案網頁範本 (HTML / CSS / JavaScript)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -75,11 +76,17 @@ HTML_TEMPLATE = '''
 # ==================== 純手寫技術指標函數 ====================
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / (loss + 1e-9)
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    
+    # 使用指數移動平均 (EMA) 精準計算標準 RSI
+    avg_gain = gain.ewm(com=period - 1, adjust=False).mean()
+    avg_loss = loss.ewm(com=period - 1, adjust=False).mean()
+    
+    rs = avg_gain / (avg_loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
+# ==================== 股票分析核心函數 ====================
 def get_stock_analysis_report(symbol):
     try:
         # 抓取 2 年資料確保 SMA200 有足夠數據
@@ -90,16 +97,16 @@ def get_stock_analysis_report(symbol):
         if df.empty or len(df) < 200:
             return f"❌ 找不到股票代碼 {symbol} 或歷史資料不足 (需至少200個交易日)"
 
-        # 使用純 pandas 計算技術指標，完全免除套件衝突
-        df['RSI'] = calculate_rsi(df['Close'], length=14)
+        # 純 pandas 計算技術指標 (完全免疫套件衝突)
+        df['RSI'] = calculate_rsi(df['Close'], period=14)
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.dropna(inplace=True)
 
         if len(df) < 20:
-            return "❌ 資料清洗後數量不足，無法進行趨勢分析"
+            return "❌ 資料量不足，無法進行趨勢分析"
 
-        # 純數學線性趨勢預測
+        # 純數學線性趨勢預測 (精準斜率外推)
         close_prices = df['Close'].tail(20).values
         x = np.arange(len(close_prices))
         y = close_prices
@@ -118,9 +125,9 @@ def get_stock_analysis_report(symbol):
 
         # 產生報告 HTML
         report = f"""
-        📊 <strong>股票代碼：</strong> {symbol}<br>
-        💰 <strong>當前價格：</strong> {current_price:.2f} USD<br>
-        🤖 <strong>AI 趨勢預測下個交易日：</strong> {pred_price:.2f} 
+        📊 <strong><strong>股票代碼：</strong></strong> {symbol}<br>
+        💰 <strong><strong>當前價格：</strong></strong> {current_price:.2f} USD<br>
+        🤖 <strong><strong>AI 趨勢預測下個交易日：</strong></strong> {pred_price:.2f} 
         <span style="color:{'green' if change_pct > 0 else 'red'}">({change_pct:+.2f}%)</span>
         """
 
@@ -137,7 +144,7 @@ def get_stock_analysis_report(symbol):
         for name, good, bad, result in masters:
             status = f"✅ {good}" if result else f"❌ {bad}"
             color = "green" if result else "red"
-            report += f"<p><strong>{name}：</strong> <span style='color:{color}'>{status}</span></p>"
+            report += f"<p><strong><strong>{name}：</strong></strong> <span style='color:{color}'>{status}</span></p>"
             if result:
                 recommendation += 1
 
