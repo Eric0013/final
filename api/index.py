@@ -24,7 +24,7 @@ HTML_TEMPLATE = '''
     <div class="container py-5">
         <div class="text-center mb-5">
             <h1 class="text-white display-4">📈 AI 股神助手</h1>
-            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 <span class="badge bg-success text-white">v2.2 Final</span></p>
+            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 <span class="badge bg-success text-white">v2.3 Mission Completed</span></p>
         </div>
 
         <div class="row justify-content-center">
@@ -104,7 +104,7 @@ def get_stock_analysis_report(symbol):
             df = None
 
         if df is None or df.empty:
-            backup_url = f"https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d"
+            backup_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
             r = requests.get(backup_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
             result = r.json()['chart']['result'][0]
             timestamps = result['timestamp']
@@ -134,11 +134,12 @@ def get_stock_analysis_report(symbol):
         close_prices = df['Close'].tail(20).values
         x = np.arange(len(close_prices))
         slope, intercept = np.polyfit(x, close_prices, 1)
-        pred_price = slope * 20 + intercept
+        
+        # 💡 終極修正：使用 .item() 或 float() 把 NumPy ndarray 轉換成純粹的 Python float 數字
+        pred_price = float((slope * 20 + intercept).item()) if hasattr(slope * 20 + intercept, 'item') else float(slope * 20 + intercept)
         current_price = float(df['Close'].iloc[-1])
         change_pct = float(((pred_price - current_price) / current_price) * 100)
 
-        # 💡 修正關鍵：強制將最後一筆的均線數值轉為純 float 數值，徹底避免 Series 比較引發的 ambiguous 異常
         last_sma200 = float(df['SMA_200'].iloc[-1])
         last_ema20 = float(df['EMA_20'].iloc[-1])
         last_rsi = float(df['RSI'].iloc[-1])
