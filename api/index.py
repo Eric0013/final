@@ -5,14 +5,14 @@ import requests
 
 app = Flask(__name__)
 
-# v3.9 Ultima Edition：完美還原截圖的置中大搜尋框、紫色極光漸層與一體化動態上移面板
+# v4.0 Master Edition：加入傳奇分析師 🔥張期凱 (只會說買爆)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手 v3.9</title>
+    <title>AI 股神助手 v4.0</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
@@ -25,7 +25,6 @@ HTML_TEMPLATE = '''
             padding-bottom: 50px;
         }
         
-        /* 💡 核心動態：一體化大容器，負責處理置中到頂部的優雅轉場 */
         .main-wrapper {
             min-height: 85vh;
             display: flex;
@@ -36,7 +35,6 @@ HTML_TEMPLATE = '''
             width: 100%;
         }
         
-        /* 當開始搜尋後，大容器一秒收縮成頂部橫條 */
         .main-wrapper.searched {
             min-height: auto;
             justify-content: flex-start;
@@ -44,7 +42,6 @@ HTML_TEMPLATE = '''
             padding-top: 20px;
         }
 
-        /* 標題與版本號 */
         .hero-header {
             text-align: center;
             margin-bottom: 2rem;
@@ -76,7 +73,6 @@ HTML_TEMPLATE = '''
             font-weight: normal;
         }
 
-        /* 搜尋框區塊 */
         .search-container {
             width: 100%;
             max-width: 650px;
@@ -129,7 +125,7 @@ HTML_TEMPLATE = '''
             transform: translateY(-1px);
         }
 
-        /* 📊 左右雙圖表佈局一體化面板 */
+        /* 左右雙圖表排版 */
         .charts-wrapper {
             display: grid;
             grid-template-columns: 68% 30%;
@@ -147,7 +143,7 @@ HTML_TEMPLATE = '''
             border: 1px solid #1c1c30;
         }
         
-        /* 📋 下方策略分析報告一體化面板 */
+        /* 策略分析報告一體化面板 */
         .card-custom { 
             background: rgba(21, 21, 38, 0.7);
             border: 1px solid rgba(61, 61, 102, 0.4);
@@ -182,10 +178,9 @@ HTML_TEMPLATE = '''
     <div class="container">
         
         <div id="mainWrapper" class="main-wrapper">
-            
             <div class="hero-header w-100" id="headerNode">
                 <h1 class="hero-title" id="appTitle">📈 AI 股神助手</h1>
-                <div class="version-badge mt-2" id="versionNode">動態 10日 K線/KD 量化分析面板 <span class="badge bg-dark text-secondary">v3.9</span></div>
+                <div class="version-badge mt-2" id="versionNode">六大名師聯手量化分析面板 <span class="badge bg-dark text-secondary">v4.0</span></div>
             </div>
 
             <div class="search-container mb-4" id="searchNode">
@@ -194,7 +189,6 @@ HTML_TEMPLATE = '''
                     <button class="btn btn-custom text-nowrap" type="submit">開始分析</button>
                 </form>
             </div>
-            
         </div>
 
         <div id="outputSection" style="display: none;">
@@ -236,16 +230,14 @@ HTML_TEMPLATE = '''
             const klineChartDiv = document.getElementById('klineChart');
             const kdChartDiv = document.getElementById('kdChart');
             
-            // 💡 觸發完美變身：首頁置中框一體化上移
             mainWrapper.classList.add('searched');
-            // 將搜尋框塞進頂部 Header 右側，達成跟截圖一模一樣的左右對稱佈局
             if(!headerNode.classList.contains('setup-done')) {
                 headerNode.appendChild(searchNode);
                 headerNode.classList.add('setup-done');
             }
             
             outputSection.style.display = 'block';
-            resultContent.innerHTML = '<p class="text-muted">🔄 正在計算量化核心指標與大師策略審查...</p>';
+            resultContent.innerHTML = '<p class="text-muted">🔄 正在同步六大名師開會共識中...</p>';
             klineChartDiv.innerHTML = '<p class="text-center text-muted py-5">載入中...</p>';
             kdChartDiv.innerHTML = '<p class="text-center text-muted py-5">載入中...</p>';
 
@@ -262,23 +254,16 @@ HTML_TEMPLATE = '''
                     return;
                 }
 
-                // 抬頭同步改寫為截圖樣式
-                appTitle.innerHTML = `📈 AI 股神助手 <span class="text-secondary fs-5">v3.9 | ${data.stock_fullname} 技術趨勢圖 (近10日)</span>`;
+                appTitle.innerHTML = `📈 AI 股神助手 <span class="text-secondary fs-5">v4.0 | ${data.stock_fullname} 技術趨勢圖 (近10日)</span>`;
                 document.getElementById('versionNode').style.display = 'none';
 
-                // 渲染大師對齊報告
                 resultContent.innerHTML = data.report;
 
-                // 準備圖表數據
-                const candlestickData = data.k_data.map(item => ({
-                    x: item.time,
-                    y: [item.open, item.high, item.low, item.close]
-                }));
+                const candlestickData = data.k_data.map(item => ({ x: item.time, y: [item.open, item.high, item.low, item.close] }));
                 const emaData = data.k_data.map(item => ({ x: item.time, y: item.ema20 }));
                 const kData = data.k_data.map(item => ({ x: item.time, y: item.k }));
                 const dData = data.k_data.map(item => ({ x: item.time, y: item.d }));
 
-                // ➡️ 【左圖】K線與 EMA 均線
                 const klineOptions = {
                     series: [
                         { name: 'K線價', type: 'candlestick', data: candlestickData },
@@ -293,7 +278,6 @@ HTML_TEMPLATE = '''
                     plotOptions: { candlestick: { colors: { upward: '#ef5350', downward: '#26a69a' }, wick: { useFillColor: true } } }
                 };
 
-                // ➡️ 【右圖】獨立 KD 指標線
                 const kdOptions = {
                     series: [
                         { name: 'K線 (KD)', data: kData },
@@ -381,7 +365,6 @@ def get_stock_analysis_data(symbol):
         if df.empty or len(df) < 200:
             return None, f"❌ 找不到股票代碼 「{symbol}」 或該股票歷史資料不足。", symbol
 
-        # 量化核心計算
         delta = df['Close'].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -397,7 +380,6 @@ def get_stock_analysis_data(symbol):
         df['D'] = d_list
         df.dropna(inplace=True)
 
-        # 趨勢線性外推
         tail_20 = df['Close'].tail(20).values
         slope, intercept = np.polyfit(np.arange(20), tail_20, 1)
         pred_raw = slope * 20 + intercept
@@ -406,15 +388,19 @@ def get_stock_analysis_data(symbol):
         current_price = float(df['Close'].iloc[-1])
         change_pct = float(((pred_price - current_price) / current_price) * 100.0)
 
+        # 舊大師邏輯
         buffett = current_price < float(df['SMA_200'].iloc[-1]) * 1.15
         livermore = (current_price > float(df['EMA_20'].iloc[-1])) and (change_pct > 0.0)
         lynch = 50.0 < float(df['RSI'].iloc[-1]) < 75.0
         wood = change_pct > 3.0
         simons = change_pct > 0.5
+        
+        # 💡 張期凱：永遠看多買爆！直接塞 True
+        chi_kai = True 
 
-        recommendation = sum([buffett, livermore, lynch, wood, simons])
+        # 票數計算總共 6 位大師
+        recommendation = sum([buffett, livermore, lynch, wood, simons, chi_kai])
 
-        # 下方大師報告雙欄對齊架構
         report = f"""
         <div class="row mb-3">
             <div class="col-sm-6 text-secondary">💰 當前價格：<span class="text-white fw-bold fs-5">{current_price:.2f} {currency}</span></div>
@@ -425,27 +411,27 @@ def get_stock_analysis_data(symbol):
         <hr>
         <div class="report-grid">
             <div>
-                <h6 class="fw-bold text-secondary mb-3">💡 五大名師看法</h6>
+                <h6 class="fw-bold text-secondary mb-3">💡 六大名師看法</h6>
                 <div class="masters-list">
                     <div>👴 巴菲特：<span style="color:{'#26a69a' if buffett else '#ef5350'}; font-weight:bold;">{'✅ 價格合理' if buffett else '❌ 價格太貴'}</span></div>
                     <div>👓 彼得・林區：<span style="color:{'#26a69a' if lynch else '#ef5350'}; font-weight:bold;">{'✅ 動能強勁' if lynch else '❌ 進入整理'}</span></div>
                     <div>🎩 李佛摩：<span style="color:{'#26a69a' if livermore else '#ef5350'}; font-weight:bold;">{'✅ 趨勢向上' if livermore else '❌ 趨勢不明'}</span></div>
                     <div>🚀 凱薩琳・伍德：<span style="color:{'#26a69a' if wood else '#ef5350'}; font-weight:bold;">{'✅ 具爆發力' if wood else '❌ 成長緩慢'}</span></div>
                     <div>💻 西蒙斯：<span style="color:{'#26a69a' if simons else '#ef5350'}; font-weight:bold;">{'✅ 數據勝率高' if simons else '❌ 數據勝率低'}</span></div>
+                    <div>🔥 張期凱：<span style="color:#ef5350; font-weight:bold;">✅ 買爆</span></div>
                 </div>
             </div>
             
             <div class="suggestion-box" style="background:{'rgba(239,83,80,0.06)' if recommendation >=4 else ('rgba(38,166,154,0.06)' if recommendation==3 else 'rgba(142,142,175,0.06)')}; border: 1px solid {'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#3d3d66')};">
                 <div class="text-secondary small mb-1">💡 綜合建議</div>
-                <div class="fs-4 fw-bold text-white mb-2">{recommendation}/5 位大師看好</div>
+                <div class="fs-4 fw-bold text-white mb-2">{recommendation}/6 位大師看好</div>
                 <div class="fs-5 fw-bold" style="color:{'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#8e8eaf')}">
-                    {'⚖ * ⚖ 可以考慮分批進場' if recommendation == 3 else ('🔥 🔥 強力買入指標！' if recommendation >= 4 else '💤 建議繼續觀望')}
+                    {'⚖️ 可以考慮分批進場' if recommendation == 3 else ('🔥 強力買入指標！' if recommendation >= 4 else '💤 建議繼續觀望')}
                 </div>
             </div>
         </div>
         """
 
-        # 精準切出最後10天
         chart_df = df.tail(10)
         k_data_list = []
         for _, row in chart_df.iterrows():
