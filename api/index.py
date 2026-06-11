@@ -1,12 +1,10 @@
 from flask import Flask, request, jsonify
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 
 app = Flask(__name__)
 
-# 直接將 HTML 畫面宣告為 Python 字串，完全繞過檔案系統
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -74,24 +72,32 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
-# ==================== 股票分析核心函數 ====================
+# ==================== 純手寫技術指標函數 ====================
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / (loss + 1e-9)
+    return 100 - (100 / (1 + rs))
+
 def get_stock_analysis_report(symbol):
     try:
-        df = yf.download(symbol, period="1y", auto_adjust=True, progress=False)
+        # 抓取 2 年資料確保 SMA200 有足夠數據
+        df = yf.download(symbol, period="2y", auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        if df.empty or len(df) < 100:
-            return f"❌ 找不到股票代碼 {symbol} 或資料不足 (需至少100個交易日)"
+        if df.empty or len(df) < 200:
+            return f"❌ 找不到股票代碼 {symbol} 或歷史資料不足 (需至少200個交易日)"
 
-        # 技術指標計算
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['EMA_20'] = ta.ema(df['Close'], length=20)
-        df['SMA_200'] = ta.sma(df['Close'], length=200)
+        # 使用純 pandas 計算技術指標，完全免除套件衝突
+        df['RSI'] = calculate_rsi(df['Close'], length=14)
+        df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
+        df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.dropna(inplace=True)
 
         if len(df) < 20:
-            return "❌ 資料量不足，無法進行趨勢分析"
+            return "❌ 資料清洗後數量不足，無法進行趨勢分析"
 
         # 純數學線性趨勢預測
         close_prices = df['Close'].tail(20).values
@@ -153,7 +159,6 @@ def get_stock_analysis_report(symbol):
 
 @app.route('/')
 def home():
-    # 直接回傳字串，不透過 render_template 找檔案
     return HTML_TEMPLATE
 
 @app.route('/analyze', methods=['POST'])
@@ -165,6 +170,5 @@ def analyze():
     report = get_stock_analysis_report(symbol)
     return jsonify({'report': report, 'symbol': symbol})
 
-# Vercel 部署不需要 app.run()，這段保留給本地測試
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
