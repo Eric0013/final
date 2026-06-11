@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -6,7 +6,7 @@ import requests
 
 app = Flask(__name__)
 
-# 100% 原始紫色排版，副標題已修正，用來驗證 Vercel 有沒有更新成功
+# 網頁副標題加上版本號 v2.1，用來絕對驗證 Vercel 有沒有真正吃到新檔案
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -25,7 +25,7 @@ HTML_TEMPLATE = '''
     <div class="container py-5">
         <div class="text-center mb-5">
             <h1 class="text-white display-4">📈 AI 股神助手</h1>
-            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 (已更新名稱與幣別機制)</p>
+            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 <span class="badge bg-warning text-dark">v2.1 Verifed</span></p>
         </div>
 
         <div class="row justify-content-center">
@@ -57,8 +57,8 @@ HTML_TEMPLATE = '''
             resultDiv.innerHTML = '<p class="text-center">🔄 正在計算技術指標與大師策略，請稍候...</p>';
 
             try {
-                // 智慧安全防禦：如果後端 Vercel 又被鎖 IP，前端直接用使用者本地 IP 去抓 Yahoo 補體
-                const response = await fetch('/analyze', {
+                // 加上時間戳記防止 Vercel 瀏覽器前端 GET/POST 快取
+                const response = await fetch('/analyze?t=' + new Date().getTime(), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `symbol=${encodeURIComponent(symbol)}`
@@ -67,8 +67,8 @@ HTML_TEMPLATE = '''
                 const data = await response.json();
                 
                 if (data.error) {
-                    // 觸發前端本地解鎖機制，完全免疫被鎖 IP 的地雷
-                    resultDiv.innerHTML = '<p class="text-center">🔄 Vercel 雲端繁忙，正在切換至本地安全通道計算大師報告...</p>';
+                    // 本地邊緣防禦解鎖機制
+                    resultDiv.innerHTML = '<p class="text-center">🔄 雲端通道優化中，正在切換至本地安全路徑計算大師報告...</p>';
                     const backupUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d`;
                     const r = await fetch(backupUrl);
                     const yData = await r.json();
@@ -79,7 +79,6 @@ HTML_TEMPLATE = '''
                     const closes = resObj.indicators.adjclose[0].adjclose.filter(c => c != null);
                     const currentPrice = closes[closes.length - 1];
                     
-                    // 快速趨勢預測
                     const tail20 = closes.slice(-20);
                     let sumX=0, sumY=0, sumXY=0, sumXX=0, n=tail20.length;
                     for(let i=0; i<n; i++){
@@ -217,7 +216,10 @@ def get_stock_analysis_report(symbol):
 
 @app.route('/')
 def home():
-    return HTML_TEMPLATE
+    response = make_response(HTML_TEMPLATE)
+    # 💡 核心優化：強迫 Vercel 邊緣節點與瀏覽器絕不快取首頁
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -225,7 +227,11 @@ def analyze():
     if not symbol:
         return jsonify({'error': '請輸入股票代碼'})
     report = get_stock_analysis_report(symbol)
-    return jsonify({'report': report, 'symbol': symbol})
+    
+    response = make_response(jsonify({'report': report, 'symbol': symbol}))
+    # 💡 核心優化：強迫 API 回傳結果絕不快取
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
