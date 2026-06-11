@@ -6,6 +6,7 @@ import requests
 
 app = Flask(__name__)
 
+# 單一檔案網頁範本 (增強前端偵錯能力，將後端報錯完全透明化)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -23,6 +24,7 @@ HTML_TEMPLATE = '''
         .form-control { background-color: #151522; border: 1px solid #3d3d5c; color: #fff; }
         .form-control:focus { background-color: #151522; color: #fff; border-color: #667eea; box-shadow: none; }
         hr { border-color: #3d3d5c; }
+        pre { background: #3a1f1f; color: #ff9999; padding: 15px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -81,6 +83,14 @@ HTML_TEMPLATE = '''
                     body: `symbol=${encodeURIComponent(symbol)}`
                 });
                 
+                // 【前端安全防禦關鍵】：如果後端壞掉噴 500 錯誤，直接抓取純文字，不解析 JSON
+                if (!res.ok) {
+                    const errText = await res.text();
+                    resultDiv.innerHTML = `<h4 class="text-danger">❌ 後端伺服器崩潰 (狀態碼: ${res.status})</h4><pre>${errText}</pre>`;
+                    chartDiv.innerHTML = '<p class="text-center text-danger">⚠️ 圖表因後端錯誤無法載入</p>';
+                    return;
+                }
+                
                 const data = await res.json();
                 
                 if (data.error) {
@@ -138,7 +148,7 @@ HTML_TEMPLATE = '''
                 chartInstance.render();
 
             } catch (err) {
-                resultDiv.innerHTML = `<p class="text-danger">連線失敗: ${err}</p>`;
+                resultDiv.innerHTML = `<h4 class="text-danger">❌ 前端渲染發生異常</h4><p>${err.message}</p>`;
                 chartDiv.innerHTML = '<p class="text-center text-danger">圖表組件載入異常</p>';
             }
         });
@@ -158,16 +168,13 @@ def calculate_rsi(series, period=14):
 
 def get_stock_analysis_report(symbol):
     try:
-        # 強大偽裝 Session 機制
         session = requests.Session()
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
         })
 
-        # 雲端環境將 period 放寬到 3y，確保留白與指標計算安全
-        df = yf.download(symbol, period="3y", auto_adjust=True, progress=False, session=session)
+        # 安全防禦升級：強制關閉 threads，防止 Vercel 無伺服器環境（Serverless）多線程死鎖崩潰
+        df = yf.download(symbol, period="3y", auto_adjust=True, progress=False, session=session, threads=False)
         
         if df is None or df.empty:
             return None, f"Yahoo 財經未回傳 「{symbol}」 的數據。若為台股請確保加上尾綴（如：2330.TW）。"
@@ -178,7 +185,6 @@ def get_stock_analysis_report(symbol):
         if len(df) < 210:
             return None, f"股票代碼 {symbol} 的歷史交易日數據不足 (現有 {len(df)} 天，需 200 天以上以計算長天期均線)"
 
-        # 指標安全計算
         df['RSI'] = calculate_rsi(df['Close'], period=14)
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
@@ -187,7 +193,6 @@ def get_stock_analysis_report(symbol):
         if len(df) < 10:
             return None, "數據經清洗後數量不足以提供 10 日線圖呈現。"
 
-        # 擷取最新 10 天
         k_df = df.tail(10).copy()
         k_data_list = []
         for index, row in k_df.iterrows():
@@ -200,7 +205,6 @@ def get_stock_analysis_report(symbol):
                 'ema20': round(float(row['EMA_20']), 2)
             })
 
-        # 線性趨勢
         close_prices = df['Close'].tail(20).values
         x = np.arange(len(close_prices))
         y = close_prices
@@ -248,8 +252,8 @@ def get_stock_analysis_report(symbol):
         return k_data_list, report
 
     except Exception as e:
-        # 將真實的錯誤拋給外部，不要再用假訊息掩蓋
-        return None, f"系統執行核心邏輯時崩潰: {str(e)}"
+        # 核心防禦：如果出錯，主動拋出異常，讓 Flask 噴出 500 給前端讀取
+        raise RuntimeError(f"get_stock_analysis_report 內部崩潰: {str(e)}")
 
 # ==================== 網站路由 ====================
 
@@ -265,7 +269,6 @@ def analyze():
     
     k_data, report = get_stock_analysis_report(symbol)
     
-    # 核心安全修正：如果後端抓取或計算出錯，直接把真實錯誤包成 JSON 回傳給前端，不盲目往下走
     if k_data is None:
         return jsonify({'error': report})
         
