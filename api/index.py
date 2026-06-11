@@ -5,14 +5,14 @@ import requests
 
 app = Flask(__name__)
 
-# 完美還原截圖：Cyberpunk 科技深色風、左右雙獨立圖表、下方雙欄大師卡片
+# v3.8 Dynamic UX Overhaul：首頁超大置中搜尋框 + 搜尋後動態上移
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手 v3.7</title>
+    <title>AI 股神助手 v3.8</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
@@ -21,46 +21,94 @@ HTML_TEMPLATE = '''
             min-height: 100vh; 
             color: #f4f4f7; 
             font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            overflow-x: hidden;
         }
-        .navbar-brand-custom {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #fff;
+        
+        /* 初始狀態：中間大搜尋框的容器 */
+        .search-hero-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 70vh;
+            transition: all 0.5s ease-in-out;
+        }
+        
+        /* 當搜尋後，這個 class 會被加到容器上，讓它一秒變頂部橫條 */
+        .search-hero-container.searched {
+            min-height: auto;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
             padding: 15px 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 1.5rem !important;
         }
-        .card-custom { 
-            background: #151526; 
-            border: 1px solid #252542; 
-            border-radius: 12px; 
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 1.5rem;
+            transition: all 0.5s ease-in-out;
+            text-shadow: 0 0 20px rgba(168, 85, 247, 0.2);
         }
+        .search-hero-container.searched .hero-title {
+            font-size: 1.5rem;
+            margin-bottom: 0;
+        }
+
+        /* 初始超大搜尋框樣式 */
+        .search-box-wrapper {
+            width: 100%;
+            max-width: 600px;
+            transition: all 0.5s ease-in-out;
+        }
+        .search-hero-container.searched .search-box-wrapper {
+            max-width: 450px;
+        }
+
         .form-control-custom {
             background-color: #1a1a30;
             border: 1px solid #3d3d66;
             color: #fff;
+            padding: 12px 20px;
+            font-size: 1.1rem;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        .search-hero-container.searched .form-control-custom {
+            padding: 8px 15px;
+            font-size: 1rem;
             border-radius: 6px;
         }
         .form-control-custom:focus {
             background-color: #1a1a30;
             color: #fff;
             border-color: #a855f7;
-            box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
         }
+
         .btn-custom {
             background: #ffffff;
             color: #10101c;
             font-weight: bold;
             border: none;
-            border-radius: 6px;
-            padding: 10px 24px;
+            border-radius: 8px;
+            padding: 12px 30px;
+            font-size: 1.1rem;
             transition: all 0.2s;
+        }
+        .search-hero-container.searched .btn-custom {
+            padding: 8px 24px;
+            font-size: 1rem;
+            border-radius: 6px;
         }
         .btn-custom:hover {
             background: #e2e8f0;
             transform: translateY(-1px);
         }
-        /* 雙圖表左右排版容器 */
+
+        /* 雙圖表左右排版 */
         .charts-wrapper {
             display: grid;
             grid-template-columns: 68% 30%;
@@ -76,7 +124,14 @@ HTML_TEMPLATE = '''
             padding: 10px;
             border: 1px solid #1f1f38;
         }
-        /* 下方大師報告雙欄對齊 */
+        
+        /* 下方策略報告面板 */
+        .card-custom { 
+            background: #151526; 
+            border: 1px solid #252542; 
+            border-radius: 12px; 
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
         .report-grid {
             display: grid;
             grid-template-columns: 65% 32%;
@@ -89,8 +144,6 @@ HTML_TEMPLATE = '''
             gap: 12px 24px;
         }
         .suggestion-box {
-            background: rgba(16, 185, 129, 0.05);
-            border: 1px solid rgba(16, 185, 129, 0.3);
             border-radius: 12px;
             padding: 25px;
             text-align: center;
@@ -98,18 +151,19 @@ HTML_TEMPLATE = '''
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.05);
         }
         hr { border-color: rgba(255, 255, 255, 0.1); }
     </style>
 </head>
 <body>
-    <div class="container py-4">
-        <div class="d-flex justify-content-between align-items-center navbar-brand-custom mb-4">
-            <div>📈 AI 股神助手 <span class="text-secondary fs-5" id="titleHeader">v3.7 | 技術趨勢圖 (近10日)</span></div>
-            <div style="width: 450px;">
-                <form id="stockForm" class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-custom" id="symbol" placeholder="例如：2330.TW 或 NVDA" required>
+    <div class="container">
+        
+        <div id="heroContainer" class="search-hero-container my-4">
+            <div class="hero-title" id="mainTitle">📈 AI 股神助手</div>
+            <div class="search-box-wrapper">
+                <form id="stockForm" class="d-flex gap-2 w-100">
+                    <input type="text" class="form-control form-control-custom w-100" id="symbol" placeholder="例如：2330.TW 或 NVDA" required>
                     <button class="btn btn-custom text-nowrap" type="submit">開始分析</button>
                 </form>
             </div>
@@ -128,7 +182,7 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
             
-            <div class="card-custom p-4">
+            <div class="card-custom p-4 mb-5">
                 <h5 class="mb-4 text-white">📋 策略分析報告</h5>
                 <div id="resultContent"></div>
             </div>
@@ -143,12 +197,17 @@ HTML_TEMPLATE = '''
         document.getElementById('stockForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            const heroContainer = document.getElementById('heroContainer');
+            const mainTitle = document.getElementById('mainTitle');
             const outputSection = document.getElementById('outputSection');
             const resultContent = document.getElementById('resultContent');
             const klineChartDiv = document.getElementById('klineChart');
             const kdChartDiv = document.getElementById('kdChart');
             
+            // 💡 核心動態效果：將搜尋框容器秒切成頂部橫條，並拉出報告區域
+            heroContainer.classList.add('searched');
             outputSection.style.display = 'block';
+            
             resultContent.innerHTML = '<p class="text-muted">🔄 正在計算量化核心指標與大師策略審查...</p>';
             klineChartDiv.innerHTML = '<p class="text-center text-muted py-5">載入中...</p>';
             kdChartDiv.innerHTML = '<p class="text-center text-muted py-5">載入中...</p>';
@@ -166,15 +225,13 @@ HTML_TEMPLATE = '''
                     return;
                 }
 
-                // 更新頂部動態 Titile 抬頭
-                document.getElementById('titleHeader').innerHTML = `v3.7 | ${data.stock_fullname} 技術趨勢圖 (近10日)`;
+                // 更新頂部動態 Title
+                mainTitle.innerHTML = `📈 AI 股神助手 <span class="text-secondary fs-5">| ${data.stock_fullname} 技術趨勢圖 (近10日)</span>`;
 
-                // 渲染下方精心對齊的雙欄報告 HTML
+                // 渲染大師對齊報告
                 resultContent.innerHTML = data.report;
 
-                // 準備圖表時間軸與數據
-                const timestamps = data.k_data.map(item => item.time);
-                
+                // 準備圖表數據
                 const candlestickData = data.k_data.map(item => ({
                     x: item.time,
                     y: [item.open, item.high, item.low, item.close]
@@ -183,7 +240,7 @@ HTML_TEMPLATE = '''
                 const kData = data.k_data.map(item => ({ x: item.time, y: item.k }));
                 const dData = data.k_data.map(item => ({ x: item.time, y: item.d }));
 
-                // ➡️ 【左圖】配置：純粹俐落的 K線價 + EMA20均線趨勢
+                // 左圖：K線與均線
                 const klineOptions = {
                     series: [
                         { name: 'K線價', type: 'candlestick', data: candlestickData },
@@ -198,7 +255,7 @@ HTML_TEMPLATE = '''
                     plotOptions: { candlestick: { colors: { upward: '#ef5350', downward: '#26a69a' }, wick: { useFillColor: true } } }
                 };
 
-                // ➡️ 【右圖】配置：純粹乾淨的 KD 指標交叉線 (包含 80 超買與 20 超賣保底防線)
+                // 右圖：KD線
                 const kdOptions = {
                     series: [
                         { name: 'K線 (KD)', data: kData },
@@ -218,7 +275,6 @@ HTML_TEMPLATE = '''
                     }
                 };
 
-                // 銷毀舊圖表實例並渲染新雙軸圖表
                 if (klineChartInstance) klineChartInstance.destroy();
                 if (kdChartInstance) kdChartInstance.destroy();
                 
@@ -324,11 +380,11 @@ def get_stock_analysis_data(symbol):
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 👴 ➡️ 100% 還原截圖中「高質感左右雙欄排版」的 HTML 架構！
+        # 雙欄高質感 HTML 報告
         report = f"""
         <div class="row mb-3">
-            <div class="col-sm-6 text-secondary">💰 當前價格：<span class="text-dark fw-bold fs-5">{current_price:.2f} {currency}</span></div>
-            <div class="col-sm-6 text-secondary">🤖 AI 趨勢預測下個交易日：<span class="text-dark fw-bold fs-5">{pred_price:.2f} {currency}</span> 
+            <div class="col-sm-6 text-secondary">💰 當前價格：<span class="text-white fw-bold fs-5">{current_price:.2f} {currency}</span></div>
+            <div class="col-sm-6 text-secondary">🤖 AI 趨勢預測下個交易日：<span class="text-white fw-bold fs-5">{pred_price:.2f} {currency}</span> 
                 <span style="color:{'#ef5350' if change_pct > 0 else '#26a69a'}; font-weight:bold;">({change_pct:+.2f}%)</span>
             </div>
         </div>
@@ -345,17 +401,17 @@ def get_stock_analysis_data(symbol):
                 </div>
             </div>
             
-            <div class="suggestion-box" style="background:{'rgba(239,83,80,0.05)' if recommendation >=4 else ('rgba(26,166,154,0.05)' if recommendation==3 else 'rgba(142,142,175,0.05)')}; border-color:{'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#8e8eaf')}">
+            <div class="suggestion-box" style="background:{'rgba(239,83,80,0.05)' if recommendation >=4 else ('rgba(26,166,154,0.05)' if recommendation==3 else 'rgba(142,142,175,0.05)')}; border: 1px solid {'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#3d3d66')};">
                 <div class="text-secondary small mb-1">💡 綜合建議</div>
-                <div class="fs-4 fw-bold text-dark mb-2">{recommendation}/5 位大師看好</div>
+                <div class="fs-4 fw-bold text-white mb-2">{recommendation}/5 位大師看好</div>
                 <div class="fs-5 fw-bold" style="color:{'#ef5350' if recommendation >=4 else ('#26a69a' if recommendation==3 else '#8e8eaf')}">
-                    {'⚖️ ⚖️ 可以考慮分批進場' if recommendation == 3 else ('🔥 🔥 強力買入指標！' if recommendation >= 4 else '💤 建議繼續觀望')}
+                    {'⚖️ 可以考慮分批進場' if recommendation == 3 else ('🔥 強力買入指標！' if recommendation >= 4 else '💤 建議繼續觀望')}
                 </div>
             </div>
         </div>
         """
 
-        # 嚴格精準切出 10 日交易日做渲染
+        # 切出精準 10 日交易日
         chart_df = df.tail(10)
         k_data_list = []
         for _, row in chart_df.iterrows():
