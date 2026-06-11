@@ -6,7 +6,7 @@ import requests
 
 app = Flask(__name__)
 
-# 100% 恢復一開始最原始、美麗的紫色漸層純文字畫面
+# 100% 保留最原始、美麗的紫色漸層純文字畫面
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -88,20 +88,25 @@ def calculate_rsi(series, period=14):
     rs = avg_gain / (avg_loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
-# ==================== 核心大師分析邏輯 (智慧雙載防堵 IP 機制) ====================
+# ==================== 核心大師分析邏輯 ====================
 def get_stock_analysis_report(symbol):
     try:
         df = None
+        stock_fullname = symbol  # 保底名稱為代碼本身
         
-        # 軌道 1：使用偽裝 Session 機制嘗試經由 yfinance 下載
+        # 智慧雙載防堵 IP 機制
         try:
             session = requests.Session()
             session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
             df = yf.download(symbol, period="2y", auto_adjust=True, progress=False, session=session, threads=False)
+            if df is not None and not df.empty:
+                # 從 yfinance 順便抓取名字
+                ticker = yf.Ticker(symbol)
+                stock_fullname = ticker.info.get('longName', symbol)
         except:
             df = None
 
-        # 軌道 2：如果 Vercel 的 IP 真的被 Yahoo 擋死導致 df 空白，立刻切換至備用直連網址解鎖數據
+        # 軌道 2：若被擋 IP 則啟動備用直連網址解鎖數據
         if df is None or df.empty:
             backup_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
             headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
@@ -113,7 +118,12 @@ def get_stock_analysis_report(symbol):
             quotes = result['indicators']['quote'][0]
             adj_close = result['indicators']['adjclose'][0]['adjclose']
             
-            # 重組為符合 pandas 的結構
+            # 💡 核心升級：從 Yahoo JSON 結構中直接挖出股票的官方全稱！
+            try:
+                stock_fullname = result['meta'].get('shortName', symbol)
+            except:
+                stock_fullname = symbol
+            
             parsed_data = []
             for i in range(len(timestamps)):
                 if quotes['open'][i] and adj_close[i]:
@@ -128,6 +138,9 @@ def get_stock_analysis_report(symbol):
 
         if df.empty or len(df) < 200:
             return f"❌ 找不到股票代碼 「{symbol}」 或該股票歷史資料不足。"
+
+        # 💡 核心升級：智慧識別幣別。包含 .TW 則使用 TWD，其餘使用 USD
+        currency = "TWD" if ".TW" in symbol.upper() else "USD"
 
         # 計算原始指標
         df['RSI'] = calculate_rsi(df['Close'], period=14)
@@ -151,11 +164,11 @@ def get_stock_analysis_report(symbol):
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 完全還原當初一模一樣的文字報告 HTML 格式
+        # 完全還原當初一模一樣的文字報告 HTML 格式 (優化名稱與幣別呈現)
         report = f"""
-        📊 <strong>股票代碼：</strong> {symbol}<br>
-        💰 <strong>當前價格：</strong> {current_price:.2f} USD<br>
-        🤖 <strong>AI 趨勢預測下個交易日：</strong> {pred_price:.2f} 
+        📊 <strong>股票名稱：</strong> {stock_fullname} ({symbol})<br>
+        💰 <strong>當前價格：</strong> {current_price:.2f} {currency}<br>
+        🤖 <strong>AI 趨勢預測下個交易日：</strong> {pred_price:.2f} {currency} 
         <span style="color:{'green' if change_pct > 0 else 'red'}">({change_pct:+.2f}%)</span>
         <hr>
         <h4>五大名師看法：</h4>
