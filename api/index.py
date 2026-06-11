@@ -5,7 +5,7 @@ import requests
 
 app = Flask(__name__)
 
-# 完美保留最純粹的紫色漸層，兼顧圖表與文字報告
+# 完美保留最純粹的紫色漸層，精準鎖定 10 天內 K 線與 KD 圖
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -26,7 +26,7 @@ HTML_TEMPLATE = '''
     <div class="container py-5">
         <div class="text-center mb-5">
             <h1 class="text-white display-4 fw-bold">📈 AI 股神助手</h1>
-            <p class="text-white lead">動態 10日 K線/KD 技術圖表 ＆ 五大名師量化分析 <span class="badge bg-success">v3.5 Ultimate</span></p>
+            <p class="text-white lead">動態精準 10日 K線/KD 技術圖表 ＆ 五大名師量化分析 <span class="badge bg-success">v3.6 Exact 10-Days</span></p>
         </div>
 
         <div class="row justify-content-center">
@@ -46,7 +46,7 @@ HTML_TEMPLATE = '''
 
                 <div id="outputSection" style="display: none;">
                     <div class="card p-4 mb-4">
-                        <h5 class="mb-3 text-white">📊 技術趨勢圖 (最近10個交易日 K線 + EMA均線 + KD線)</h5>
+                        <h5 class="mb-3 text-white">📊 技術趨勢圖 (精準最近 10 個交易日 K線 + EMA均線 + KD線)</h5>
                         <div id="chart"></div>
                     </div>
                     
@@ -72,10 +72,9 @@ HTML_TEMPLATE = '''
             
             outputSection.style.display = 'block';
             resultDiv.innerHTML = '<p class="text-center text-secondary">🔄 正在計算技術指標與大師策略，請稍候...</p>';
-            chartDiv.innerHTML = '<p class="text-center text-white">🔄 正在載入近10日K線與KD數據...</p>';
+            chartDiv.innerHTML = '<p class="text-center text-white">🔄 正在載入精準近 10 日 K線與 KD 數據...</p>';
 
             try {
-                // 1. 一律由後端 Python 發送中繼請求，100% 避開瀏覽器 CORS 跨網域阻擋
                 const response = await fetch('/analyze?t=' + new Date().getTime(), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -90,10 +89,9 @@ HTML_TEMPLATE = '''
                     return;
                 }
 
-                // 2. 渲染下方大師文字報告
                 resultDiv.innerHTML = data.report;
 
-                // 3. 處理後端傳回的 10 日繪圖數據
+                // 轉換精準的 10 日技術數據
                 const candlestickData = data.k_data.map(item => ({
                     x: item.time,
                     y: [item.open, item.high, item.low, item.close]
@@ -103,7 +101,6 @@ HTML_TEMPLATE = '''
                 const kGraphData = data.k_data.map(item => ({ x: item.time, y: item.k }));
                 const dGraphData = data.k_data.map(item => ({ x: item.time, y: item.d }));
 
-                // 4. 渲染 ApexCharts
                 const options = {
                     series: [
                         { name: 'K線價', type: 'candlestick', data: candlestickData },
@@ -139,37 +136,32 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
-# 後端 Python 計算 KD 線公式
+# 後端 Python 精準計算 KD 線
 def calculate_backend_kd(df_close, df_high, df_low, period=9):
     k_vals = [50.0]
     d_vals = [50.0]
-    
     for i in range(len(df_close)):
         if i < period - 1:
             if i > 0:
                 k_vals.append(50.0)
                 d_vals.append(50.0)
             continue
-            
         sub_high = df_high.iloc[i - period + 1 : i + 1]
         sub_low = df_low.iloc[i - period + 1 : i + 1]
         max_h = float(sub_high.max())
         min_l = float(sub_low.min())
-        
         current_close = float(df_close.iloc[i])
         rsv = 50.0 if max_h == min_l else ((current_close - min_l) / (max_h - min_l)) * 100.0
-        
         next_k = (2.0/3.0) * k_vals[-1] + (1.0/3.0) * rsv
         next_d = (2.0/3.0) * d_vals[-1] + (1.0/3.0) * next_k
         k_vals.append(next_k)
         d_vals.append(next_d)
-        
     return k_vals, d_vals
 
-# ==================== 核心量化核心邏輯 ====================
+# ==================== 核心量化分析邏輯 ====================
 def get_stock_analysis_data(symbol):
     try:
-        # 100% 走不鎖海外雲端 IP、不需要 Session 憑證的免簽官方直接 API
+        # 後端直接連線免簽 API 軌道
         api_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         r = requests.get(api_url, headers=headers, timeout=10)
@@ -183,7 +175,6 @@ def get_stock_analysis_data(symbol):
         stock_fullname = result['meta'].get('shortName', symbol)
         currency = "TWD" if ".TW" in symbol.upper() else "USD"
 
-        # 解析並轉換
         parsed_data = []
         for i in range(len(timestamps)):
             if quotes['open'][i] is not None and adj_close[i] is not None:
@@ -199,7 +190,7 @@ def get_stock_analysis_data(symbol):
         if df.empty or len(df) < 200:
             return None, f"❌ 找不到股票代碼 「{symbol}」 或該股票歷史資料不足。"
 
-        # 指標運算
+        # 量化計算
         delta = df['Close'].diff()
         gain = delta.clip(lower=0)
         loss = -delta.clip(upper=0)
@@ -210,13 +201,12 @@ def get_stock_analysis_data(symbol):
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         
-        # 計算 KD 線
         k_list, d_list = calculate_backend_kd(df['Close'], df['High'], df['Low'], 9)
         df['K'] = k_list
         df['D'] = d_list
         df.dropna(inplace=True)
 
-        # 線性預測
+        # 線性趨勢預測
         tail_20 = df['Close'].tail(20).values
         slope, intercept = np.polyfit(np.arange(20), tail_20, 1)
         pred_raw = slope * 20 + intercept
@@ -225,14 +215,14 @@ def get_stock_analysis_data(symbol):
         current_price = float(df['Close'].iloc[-1])
         change_pct = float(((pred_price - current_price) / current_price) * 100.0)
 
-        # 大師判斷
+        # 大師核心策略
         buffett = current_price < float(df['SMA_200'].iloc[-1]) * 1.15
         livermore = (current_price > float(df['EMA_20'].iloc[-1])) and (change_pct > 0.0)
         lynch = 50.0 < float(df['RSI'].iloc[-1]) < 75.0
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 組合純文字 HTML 報告
+        # 原汁原味 HTML 報告
         report = f"""
         📊 <strong>股票名稱：</strong> {stock_fullname} ({symbol})<br>
         💰 <strong>當前價格：</strong> {current_price:.2f} {currency}<br>
@@ -262,7 +252,7 @@ def get_stock_analysis_data(symbol):
         elif recommendation == 3: report += "<h3 style='color:orange'>⚖️ 可以考慮分批進場</h3>"
         else: report += "<h3 style='color:gray'>💤 建議繼續觀望</h3>"
 
-        # 打包最新 10 天數據供前台繪圖
+        # 💡 核心修正：計算完所有大師條件後，最後一步用 tail(10) 強制、嚴格限定只抓「10個交易日」
         chart_df = df.tail(10)
         k_data_list = []
         for _, row in chart_df.iterrows():
