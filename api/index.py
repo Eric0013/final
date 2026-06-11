@@ -6,71 +6,185 @@ import requests
 
 app = Flask(__name__)
 
+# 完美整合前端 ApexCharts（繪製近10日K線、均線與KD線）與最原始的紫色漸層
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手</title>
+    <title>AI 股神助手 + 10日KD趨勢圖</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
-        body { background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; }
-        .card { border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        body { background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; color: #fff; }
+        .card { border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.2); }
         .result { background: white; border-radius: 12px; padding: 20px; color: #333; }
+        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 420px; }
     </style>
 </head>
 <body>
     <div class="container py-5">
         <div class="text-center mb-5">
-            <h1 class="text-white display-4">📈 AI 股神助手</h1>
-            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 <span class="badge bg-success text-white">v2.3 Mission Completed</span></p>
+            <h1 class="text-white display-4 fw-bold">📈 AI 股神助手</h1>
+            <p class="text-white lead">動態 10日 K線/KD 技術圖表 ＆ 五大名師量化分析 <span class="badge bg-info text-dark">v3.0 Charts Integrated</span></p>
         </div>
 
         <div class="row justify-content-center">
-            <div class="col-md-8">
-                <div class="card">
+            <div class="col-md-9 col-lg-8">
+                
+                <div class="card p-4 mb-4">
                     <div class="card-body">
                         <form id="stockForm">
-                            <div class="input-group mb-3">
+                            <div class="input-group">
                                 <input type="text" class="form-control form-control-lg" 
                                        id="symbol" placeholder="例如：2330.TW 或 NVDA" required>
                                 <button class="btn btn-primary btn-lg" type="submit">開始分析</button>
                             </div>
                         </form>
-
-                        <div id="result" class="result mt-4" style="display:none;"></div>
                     </div>
                 </div>
+
+                <div id="outputSection" style="display: none;">
+                    <div class="card p-4 mb-4">
+                        <h5 class="mb-3 text-white">📊 技術趨勢圖 (最近10個交易日 K線 + EMA均線 + KD線)</h5>
+                        <div id="chart"></div>
+                    </div>
+                    
+                    <div class="card p-4 mb-4" style="background: white; color: #333; border-radius: 15px;">
+                        <h5 class="mb-3 fw-bold">📋 策略分析報告</h5>
+                        <div id="result" class="result p-0"></div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 
     <script>
+        let chartInstance = null;
+
+        // 純前端免鎖 IP 計算 KD 線公式
+        function calculateKD(closeArr, highArr, lowArr, period=9) {
+            let kArr = [50];
+            let dArr = [50];
+            for (let i = 0; i < closeArr.length; i++) {
+                if (i < period - 1) {
+                    if (i > 0) { kArr.push(50); dArr.push(50); }
+                    continue;
+                }
+                let subHigh = highArr.slice(i - period + 1, i + 1);
+                let subLow = lowArr.slice(i - period + 1, i + 1);
+                let maxHigh = Math.max(...subHigh);
+                let minLow = Math.min(...subLow);
+                let rsv = maxHigh === minLow ? 50 : ((closeArr[i] - minLow) / (maxHigh - minLow)) * 100;
+                
+                let nextK = (2/3) * kArr[kArr.length - 1] + (1/3) * rsv;
+                let nextD = (2/3) * dArr[dArr.length - 1] + (1/3) * nextK;
+                kArr.push(nextK);
+                dArr.push(nextD);
+            }
+            return { K: kArr, D: dArr };
+        }
+
         document.getElementById('stockForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+            const outputSection = document.getElementById('outputSection');
             const resultDiv = document.getElementById('result');
+            const chartDiv = document.getElementById('chart');
             
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = '<p class="text-center">🔄 正在計算技術指標與大師策略，請稍候...</p>';
+            outputSection.style.display = 'block';
+            resultDiv.innerHTML = '<p class="text-center">🔄 正在載入歷史交易數據並計算大師策略...</p>';
+            chartDiv.innerHTML = '<p class="text-center text-white">🔄 正在繪製近10日 K 線與 KD 圖...</p>';
 
             try {
+                // 1. 前端走使用者台灣 IP 安全直連 Yahoo 官方 API (永不鎖 IP)
+                const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d`;
+                const yResponse = await fetch(yahooUrl);
+                const yData = await yResponse.json();
+                
+                const result = yData.chart.result[0];
+                const timestamps = result.timestamp;
+                const quotes = result.indicators.quote[0];
+                const adjClose = result.indicators.adjclose[0].adjclose;
+
+                // 2. 組裝資料
+                let rawData = [];
+                for(let i=0; i<timestamps.length; i++) {
+                    if (quotes.open[i] && quotes.high[i] && quotes.low[i] && adjClose[i]) {
+                        rawData.push({
+                            time: timestamps[i] * 1000,
+                            open: quotes.open[i],
+                            high: quotes.high[i],
+                            low: quotes.low[i],
+                            close: adjClose[i]
+                        });
+                    }
+                }
+
+                // 3. 計算前台圖表需要疊加的 EMA20 均線與 KD 指標
+                let closes = rawData.map(d => d.close);
+                let highs = rawData.map(d => d.high);
+                let lows = rawData.map(d => d.low);
+                
+                let ema20 = [];
+                let k = 2 / (20 + 1);
+                ema20[0] = closes[0];
+                for (let i = 1; i < closes.length; i++) {
+                    ema20[i] = closes[i] * k + ema20[i-1] * (1 - k);
+                }
+                let kd = calculateKD(closes, highs, lows, 9);
+
+                // 4. 將抓到的純資料發送給後端 Python 做原本的名師策略邏輯審查 (安全賦值)
                 const response = await fetch('/analyze?t=' + new Date().getTime(), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `symbol=${encodeURIComponent(symbol)}`
                 });
-                
                 const data = await response.json();
-                
-                if (data.error) {
-                    resultDiv.innerHTML = `<h4 class="mb-3 text-danger">分析失敗</h4><p>${data.error}</p>`;
-                } else {
-                    resultDiv.innerHTML = `<h4 class="mb-3">分析結果 - ${data.symbol}</h4>${data.report}`;
-                }
+                resultDiv.innerHTML = data.report;
+
+                // 5. 精準擷取最新 10 天數據準備繪圖
+                let chartSlice = rawData.slice(-10);
+                let emaSlice = ema20.slice(-10);
+                let kSlice = kd.K.slice(-10);
+                let dSlice = kd.D.slice(-10);
+
+                const candlestickData = chartSlice.map(d => ({ x: d.time, y: [d.open, d.high, d.low, d.close] }));
+                const emaGraphData = chartSlice.map((d, idx) => ({ x: d.time, y: emaSlice[idx] }));
+                const kGraphData = chartSlice.map((d, idx) => ({ x: d.time, y: kSlice[idx] }));
+                const dGraphData = chartSlice.map((d, idx) => ({ x: d.time, y: dSlice[idx] }));
+
+                // 6. 配置與繪製 ApexCharts 圖表 (K線、均線共用主軸，KD單獨使用右側百份比副軸)
+                const options = {
+                    series: [
+                        { name: 'K線價', type: 'candlestick', data: candlestickData },
+                        { name: 'EMA20均線', type: 'line', data: emaGraphData },
+                        { name: 'K線 (KD)', type: 'line', data: kGraphData },
+                        { name: 'D線 (KD)', type: 'line', data: dGraphData }
+                    ],
+                    chart: { type: 'line', height: 420, background: '#1e1e2f', foreColor: '#cccccc', toolbar: { show: true } },
+                    xaxis: { type: 'datetime', labels: { datetimeUTC: true } },
+                    yaxis: [
+                        { seriesName: 'K線價', decimalsInFloat: 2, title: { text: "價格軸" } },
+                        { seriesName: 'K線價', show: false },
+                        { seriesName: 'K線 (KD)', max: 100, min: 0, opposite: true, title: { text: "KD指標軸 (0-100)" } },
+                        { seriesName: 'K線 (KD)', max: 100, min: 0, show: false }
+                    ],
+                    stroke: { width: [1, 2.5, 2, 2], dashArray: [0, 0, 0, 4] },
+                    colors: ['#ef5350', '#ff9800', '#00b0ff', '#ffea00'], // 漲紅、均線橘、K線藍、D線黃
+                    plotOptions: { candlestick: { colors: { upward: '#ef5350', downward: '#26a69a' } } }
+                };
+
+                if (chartInstance) { chartInstance.destroy(); }
+                chartDiv.innerHTML = '';
+                chartInstance = new ApexCharts(chartDiv, options);
+                chartInstance.render();
+
             } catch (err) {
-                resultDiv.innerHTML = `<h4 class="mb-3 text-danger">錯誤</h4><p>伺服器連線異常，請確認代碼後重試。</p>`;
+                resultDiv.innerHTML = `<h4 class="text-danger">❌ 載入失敗</h4><p>無法成功解析數據，請確認代碼（如 2330.TW）是否輸入正確。</p>`;
+                chartDiv.innerHTML = '<p class="text-center text-danger">⚠️ 圖表數據渲染異常</p>';
             }
         });
     </script>
@@ -87,7 +201,7 @@ def calculate_rsi(series, period=14):
     rs = avg_gain / (avg_loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
-# ==================== 核心大師分析邏輯 ====================
+# ==================== 後端 Python 核心評估函數 ====================
 def get_stock_analysis_report(symbol):
     try:
         df = None
@@ -124,7 +238,7 @@ def get_stock_analysis_report(symbol):
 
         currency = "TWD" if ".TW" in symbol.upper() else "USD"
 
-        # 計算原始指標
+        # 技術指標計算
         df['RSI'] = calculate_rsi(df['Close'], period=14)
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
@@ -134,8 +248,6 @@ def get_stock_analysis_report(symbol):
         close_prices = df['Close'].tail(20).values
         x = np.arange(len(close_prices))
         slope, intercept = np.polyfit(x, close_prices, 1)
-        
-        # 💡 終極修正：使用 .item() 或 float() 把 NumPy ndarray 轉換成純粹的 Python float 數字
         pred_price = float((slope * 20 + intercept).item()) if hasattr(slope * 20 + intercept, 'item') else float(slope * 20 + intercept)
         current_price = float(df['Close'].iloc[-1])
         change_pct = float(((pred_price - current_price) / current_price) * 100)
@@ -151,6 +263,7 @@ def get_stock_analysis_report(symbol):
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
+        # 完全保留當初一模一樣的文字報告 HTML 格式 (整合名稱與智慧幣別)
         report = f"""
         📊 <strong>股票名稱：</strong> {stock_fullname} ({symbol})<br>
         💰 <strong>當前價格：</strong> {current_price:.2f} {currency}<br>
