@@ -1,25 +1,24 @@
 from flask import Flask, request, jsonify, make_response
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
 
 app = Flask(__name__)
 
-# 完美整合前端 ApexCharts（繪製近10日K線、均線與KD線）與最原始的紫色漸層
+# 完美保留最純粹的紫色漸層，兼顧圖表與文字報告
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手 + 10日KD趨勢圖</title>
+    <title>AI 股神助手</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
         body { background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; color: #fff; }
         .card { border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.2); }
-        .result { background: white; border-radius: 12px; padding: 20px; color: #333; }
+        .result-card { background: white; border-radius: 15px; padding: 25px; color: #333; box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
         #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 420px; }
     </style>
 </head>
@@ -27,7 +26,7 @@ HTML_TEMPLATE = '''
     <div class="container py-5">
         <div class="text-center mb-5">
             <h1 class="text-white display-4 fw-bold">📈 AI 股神助手</h1>
-            <p class="text-white lead">動態 10日 K線/KD 技術圖表 ＆ 五大名師量化分析 <span class="badge bg-info text-dark">v3.0 Charts Integrated</span></p>
+            <p class="text-white lead">動態 10日 K線/KD 技術圖表 ＆ 五大名師量化分析 <span class="badge bg-success">v3.5 Ultimate</span></p>
         </div>
 
         <div class="row justify-content-center">
@@ -51,9 +50,9 @@ HTML_TEMPLATE = '''
                         <div id="chart"></div>
                     </div>
                     
-                    <div class="card p-4 mb-4" style="background: white; color: #333; border-radius: 15px;">
-                        <h5 class="mb-3 fw-bold">📋 策略分析報告</h5>
-                        <div id="result" class="result p-0"></div>
+                    <div class="result-card p-4 mb-4">
+                        <h5 class="mb-3 fw-bold text-dark">📋 策略分析報告</h5>
+                        <div id="result"></div>
                     </div>
                 </div>
 
@@ -64,29 +63,6 @@ HTML_TEMPLATE = '''
     <script>
         let chartInstance = null;
 
-        // 純前端免鎖 IP 計算 KD 線公式
-        function calculateKD(closeArr, highArr, lowArr, period=9) {
-            let kArr = [50];
-            let dArr = [50];
-            for (let i = 0; i < closeArr.length; i++) {
-                if (i < period - 1) {
-                    if (i > 0) { kArr.push(50); dArr.push(50); }
-                    continue;
-                }
-                let subHigh = highArr.slice(i - period + 1, i + 1);
-                let subLow = lowArr.slice(i - period + 1, i + 1);
-                let maxHigh = Math.max(...subHigh);
-                let minLow = Math.min(...subLow);
-                let rsv = maxHigh === minLow ? 50 : ((closeArr[i] - minLow) / (maxHigh - minLow)) * 100;
-                
-                let nextK = (2/3) * kArr[kArr.length - 1] + (1/3) * rsv;
-                let nextD = (2/3) * dArr[dArr.length - 1] + (1/3) * nextK;
-                kArr.push(nextK);
-                dArr.push(nextD);
-            }
-            return { K: kArr, D: dArr };
-        }
-
         document.getElementById('stockForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const symbol = document.getElementById('symbol').value.trim().toUpperCase();
@@ -95,68 +71,39 @@ HTML_TEMPLATE = '''
             const chartDiv = document.getElementById('chart');
             
             outputSection.style.display = 'block';
-            resultDiv.innerHTML = '<p class="text-center">🔄 正在載入歷史交易數據並計算大師策略...</p>';
-            chartDiv.innerHTML = '<p class="text-center text-white">🔄 正在繪製近10日 K 線與 KD 圖...</p>';
+            resultDiv.innerHTML = '<p class="text-center text-secondary">🔄 正在計算技術指標與大師策略，請稍候...</p>';
+            chartDiv.innerHTML = '<p class="text-center text-white">🔄 正在載入近10日K線與KD數據...</p>';
 
             try {
-                // 1. 前端走使用者台灣 IP 安全直連 Yahoo 官方 API (永不鎖 IP)
-                const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d`;
-                const yResponse = await fetch(yahooUrl);
-                const yData = await yResponse.json();
-                
-                const result = yData.chart.result[0];
-                const timestamps = result.timestamp;
-                const quotes = result.indicators.quote[0];
-                const adjClose = result.indicators.adjclose[0].adjclose;
-
-                // 2. 組裝資料
-                let rawData = [];
-                for(let i=0; i<timestamps.length; i++) {
-                    if (quotes.open[i] && quotes.high[i] && quotes.low[i] && adjClose[i]) {
-                        rawData.push({
-                            time: timestamps[i] * 1000,
-                            open: quotes.open[i],
-                            high: quotes.high[i],
-                            low: quotes.low[i],
-                            close: adjClose[i]
-                        });
-                    }
-                }
-
-                // 3. 計算前台圖表需要疊加的 EMA20 均線與 KD 指標
-                let closes = rawData.map(d => d.close);
-                let highs = rawData.map(d => d.high);
-                let lows = rawData.map(d => d.low);
-                
-                let ema20 = [];
-                let k = 2 / (20 + 1);
-                ema20[0] = closes[0];
-                for (let i = 1; i < closes.length; i++) {
-                    ema20[i] = closes[i] * k + ema20[i-1] * (1 - k);
-                }
-                let kd = calculateKD(closes, highs, lows, 9);
-
-                // 4. 將抓到的純資料發送給後端 Python 做原本的名師策略邏輯審查 (安全賦值)
+                // 1. 一律由後端 Python 發送中繼請求，100% 避開瀏覽器 CORS 跨網域阻擋
                 const response = await fetch('/analyze?t=' + new Date().getTime(), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `symbol=${encodeURIComponent(symbol)}`
                 });
+                
                 const data = await response.json();
+                
+                if (data.error) {
+                    resultDiv.innerHTML = `<h4 class="mb-3 text-danger">分析失敗</h4><p>${data.error}</p>`;
+                    chartDiv.innerHTML = '<p class="text-center text-danger">⚠️ 圖表數據因後端異常無法呈現</p>';
+                    return;
+                }
+
+                // 2. 渲染下方大師文字報告
                 resultDiv.innerHTML = data.report;
 
-                // 5. 精準擷取最新 10 天數據準備繪圖
-                let chartSlice = rawData.slice(-10);
-                let emaSlice = ema20.slice(-10);
-                let kSlice = kd.K.slice(-10);
-                let dSlice = kd.D.slice(-10);
+                // 3. 處理後端傳回的 10 日繪圖數據
+                const candlestickData = data.k_data.map(item => ({
+                    x: item.time,
+                    y: [item.open, item.high, item.low, item.close]
+                }));
 
-                const candlestickData = chartSlice.map(d => ({ x: d.time, y: [d.open, d.high, d.low, d.close] }));
-                const emaGraphData = chartSlice.map((d, idx) => ({ x: d.time, y: emaSlice[idx] }));
-                const kGraphData = chartSlice.map((d, idx) => ({ x: d.time, y: kSlice[idx] }));
-                const dGraphData = chartSlice.map((d, idx) => ({ x: d.time, y: dSlice[idx] }));
+                const emaGraphData = data.k_data.map(item => ({ x: item.time, y: item.ema20 }));
+                const kGraphData = data.k_data.map(item => ({ x: item.time, y: item.k }));
+                const dGraphData = data.k_data.map(item => ({ x: item.time, y: item.d }));
 
-                // 6. 配置與繪製 ApexCharts 圖表 (K線、均線共用主軸，KD單獨使用右側百份比副軸)
+                // 4. 渲染 ApexCharts
                 const options = {
                     series: [
                         { name: 'K線價', type: 'candlestick', data: candlestickData },
@@ -173,7 +120,7 @@ HTML_TEMPLATE = '''
                         { seriesName: 'K線 (KD)', max: 100, min: 0, show: false }
                     ],
                     stroke: { width: [1, 2.5, 2, 2], dashArray: [0, 0, 0, 4] },
-                    colors: ['#ef5350', '#ff9800', '#00b0ff', '#ffea00'], // 漲紅、均線橘、K線藍、D線黃
+                    colors: ['#ef5350', '#ff9800', '#00b0ff', '#ffea00'],
                     plotOptions: { candlestick: { colors: { upward: '#ef5350', downward: '#26a69a' } } }
                 };
 
@@ -183,8 +130,8 @@ HTML_TEMPLATE = '''
                 chartInstance.render();
 
             } catch (err) {
-                resultDiv.innerHTML = `<h4 class="text-danger">❌ 載入失敗</h4><p>無法成功解析數據，請確認代碼（如 2330.TW）是否輸入正確。</p>`;
-                chartDiv.innerHTML = '<p class="text-center text-danger">⚠️ 圖表數據渲染異常</p>';
+                resultDiv.innerHTML = `<h4 class="mb-3 text-danger">錯誤</h4><p>網絡連線異常，請重試。</p>`;
+                chartDiv.innerHTML = '<p class="text-center text-danger">⚠️ 圖表組件載入異常</p>';
             }
         });
     </script>
@@ -192,78 +139,100 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(com=period - 1, adjust=False).mean()
-    avg_loss = loss.ewm(com=period - 1, adjust=False).mean()
-    rs = avg_gain / (avg_loss + 1e-9)
-    return 100 - (100 / (1 + rs))
-
-# ==================== 後端 Python 核心評估函數 ====================
-def get_stock_analysis_report(symbol):
-    try:
-        df = None
-        stock_fullname = symbol
+# 後端 Python 計算 KD 線公式
+def calculate_backend_kd(df_close, df_high, df_low, period=9):
+    k_vals = [50.0]
+    d_vals = [50.0]
+    
+    for i in range(len(df_close)):
+        if i < period - 1:
+            if i > 0:
+                k_vals.append(50.0)
+                d_vals.append(50.0)
+            continue
+            
+        sub_high = df_high.iloc[i - period + 1 : i + 1]
+        sub_low = df_low.iloc[i - period + 1 : i + 1]
+        max_h = float(sub_high.max())
+        min_l = float(sub_low.min())
         
-        try:
-            session = requests.Session()
-            session.headers.update({'User-Agent': 'Mozilla/5.0'})
-            df = yf.download(symbol, period="2y", auto_adjust=True, progress=False, session=session, threads=False)
-            if df is not None and not df.empty:
-                ticker = yf.Ticker(symbol)
-                stock_fullname = ticker.info.get('longName', symbol)
-        except:
-            df = None
+        current_close = float(df_close.iloc[i])
+        rsv = 50.0 if max_h == min_l else ((current_close - min_l) / (max_h - min_l)) * 100.0
+        
+        next_k = (2.0/3.0) * k_vals[-1] + (1.0/3.0) * rsv
+        next_d = (2.0/3.0) * d_vals[-1] + (1.0/3.0) * next_k
+        k_vals.append(next_k)
+        d_vals.append(next_d)
+        
+    return k_vals, d_vals
 
-        if df is None or df.empty:
-            backup_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
-            r = requests.get(backup_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-            result = r.json()['chart']['result'][0]
-            timestamps = result['timestamp']
-            quotes = result['indicators']['quote'][0]
-            adj_close = result['indicators']['adjclose'][0]['adjclose']
-            
-            try:
-                stock_fullname = result['meta'].get('shortName', symbol)
-            except:
-                stock_fullname = symbol
-            
-            parsed_data = [{'Date': pd.to_datetime(timestamps[i], unit='s'), 'Open': quotes['open'][i], 'High': quotes['high'][i], 'Low': quotes['low'][i], 'Close': adj_close[i]} for i in range(len(timestamps)) if quotes['open'][i] and adj_close[i]]
-            df = pd.DataFrame(parsed_data).set_index('Date')
-
-        if df.empty or len(df) < 200:
-            return f"❌ 找不到股票代碼 「{symbol}」 或該股票歷史資料不足。"
-
+# ==================== 核心量化核心邏輯 ====================
+def get_stock_analysis_data(symbol):
+    try:
+        # 100% 走不鎖海外雲端 IP、不需要 Session 憑證的免簽官方直接 API
+        api_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        r = requests.get(api_url, headers=headers, timeout=10)
+        y_data = r.json()
+        
+        result = y_data['chart']['result'][0]
+        timestamps = result['timestamp']
+        quotes = result['indicators']['quote'][0]
+        adj_close = result['indicators']['adjclose'][0]['adjclose']
+        
+        stock_fullname = result['meta'].get('shortName', symbol)
         currency = "TWD" if ".TW" in symbol.upper() else "USD"
 
-        # 技術指標計算
-        df['RSI'] = calculate_rsi(df['Close'], period=14)
+        # 解析並轉換
+        parsed_data = []
+        for i in range(len(timestamps)):
+            if quotes['open'][i] is not None and adj_close[i] is not None:
+                parsed_data.append({
+                    'time': int(timestamps[i] * 1000),
+                    'Open': float(quotes['open'][i]),
+                    'High': float(quotes['high'][i]),
+                    'Low': float(quotes['low'][i]),
+                    'Close': float(adj_close[i])
+                })
+        
+        df = pd.DataFrame(parsed_data)
+        if df.empty or len(df) < 200:
+            return None, f"❌ 找不到股票代碼 「{symbol}」 或該股票歷史資料不足。"
+
+        # 指標運算
+        delta = df['Close'].diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.ewm(com=13, adjust=False).mean()
+        avg_loss = loss.ewm(com=13, adjust=False).mean()
+        df['RSI'] = 100.0 - (100.0 / (1.0 + (avg_gain / (avg_loss + 1e-9))))
+        
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
+        
+        # 計算 KD 線
+        k_list, d_list = calculate_backend_kd(df['Close'], df['High'], df['Low'], 9)
+        df['K'] = k_list
+        df['D'] = d_list
         df.dropna(inplace=True)
 
-        # 線性預測公式
-        close_prices = df['Close'].tail(20).values
-        x = np.arange(len(close_prices))
-        slope, intercept = np.polyfit(x, close_prices, 1)
-        pred_price = float((slope * 20 + intercept).item()) if hasattr(slope * 20 + intercept, 'item') else float(slope * 20 + intercept)
+        # 線性預測
+        tail_20 = df['Close'].tail(20).values
+        slope, intercept = np.polyfit(np.arange(20), tail_20, 1)
+        pred_raw = slope * 20 + intercept
+        pred_price = float(pred_raw.item()) if hasattr(pred_raw, 'item') else float(pred_raw)
+        
         current_price = float(df['Close'].iloc[-1])
-        change_pct = float(((pred_price - current_price) / current_price) * 100)
+        change_pct = float(((pred_price - current_price) / current_price) * 100.0)
 
-        last_sma200 = float(df['SMA_200'].iloc[-1])
-        last_ema20 = float(df['EMA_20'].iloc[-1])
-        last_rsi = float(df['RSI'].iloc[-1])
-
-        # 大師判斷邏輯
-        buffett = current_price < last_sma200 * 1.15
-        livermore = (current_price > last_ema20) and (change_pct > 0)
-        lynch = 50 < last_rsi < 75
+        # 大師判斷
+        buffett = current_price < float(df['SMA_200'].iloc[-1]) * 1.15
+        livermore = (current_price > float(df['EMA_20'].iloc[-1])) and (change_pct > 0.0)
+        lynch = 50.0 < float(df['RSI'].iloc[-1]) < 75.0
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 完全保留當初一模一樣的文字報告 HTML 格式 (整合名稱與智慧幣別)
+        # 組合純文字 HTML 報告
         report = f"""
         📊 <strong>股票名稱：</strong> {stock_fullname} ({symbol})<br>
         💰 <strong>當前價格：</strong> {current_price:.2f} {currency}<br>
@@ -293,10 +262,25 @@ def get_stock_analysis_report(symbol):
         elif recommendation == 3: report += "<h3 style='color:orange'>⚖️ 可以考慮分批進場</h3>"
         else: report += "<h3 style='color:gray'>💤 建議繼續觀望</h3>"
 
-        return report
+        # 打包最新 10 天數據供前台繪圖
+        chart_df = df.tail(10)
+        k_data_list = []
+        for _, row in chart_df.iterrows():
+            k_data_list.append({
+                'time': int(row['time']),
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close']),
+                'ema20': float(row['EMA_20']),
+                'k': float(row['K']),
+                'd': float(row['D'])
+            })
+
+        return {'report': report, 'k_data': k_data_list}, None
 
     except Exception as e:
-        return f"❌ 數據庫清洗異常: {str(e)}"
+        return None, f"❌ 數據庫清洗異常: {str(e)}"
 
 @app.route('/')
 def home():
@@ -309,9 +293,12 @@ def analyze():
     symbol = request.form.get('symbol', '').strip().upper()
     if not symbol:
         return jsonify({'error': '請輸入股票代碼'})
-    report = get_stock_analysis_report(symbol)
-    
-    response = make_response(jsonify({'report': report, 'symbol': symbol}))
+        
+    data, error = get_stock_analysis_data(symbol)
+    if error:
+        return jsonify({'error': error})
+        
+    response = make_response(jsonify({'report': data['report'], 'symbol': symbol, 'k_data': data['k_data']}))
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response
 
