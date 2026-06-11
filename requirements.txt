@@ -1,6 +1,6 @@
-flask
-yfinance
-pandas
-pandas_ta
-numpy
-scikit-learn
+Flask==3.0.3
+yfinance==0.2.40
+pandas==2.2.2
+pandas_ta==0.3.14b0
+numpy==1.26.4
+scikit-learn==1.5.0
