@@ -6,23 +6,23 @@ import requests
 
 app = Flask(__name__)
 
-# 單一檔案網頁範本 (已完全修復前端繪圖時區與時間格式問題)
+# 單一檔案網頁範本 (上下結構，確保圖表100%顯示，鎖定近10日K線)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 股神助手 + 互動K線圖</title>
+    <title>AI 股神助手 + 10日K線圖</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
         body { background: linear-gradient(135deg, #1e1e2f, #2d1b4e); color: #f4f4f7; min-height: 100vh; }
         .card { background-color: #252538; border: none; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); color: #f4f4f7; }
-        .result-box { background: #1e1e2f; border-radius: 12px; padding: 25px; border: 1px solid #3d3d5c; }
-        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 430px; }
+        .result-box { background: #1e1e2f; border-radius: 12px; padding: 25px; border: 1px solid #3d3d5c; font-size: 1.15rem; line-height: 1.8; }
+        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 380px; }
         .form-control { background-color: #151522; border: 1px solid #3d3d5c; color: #fff; }
-        .form-control:focus { background-color: #151522; color: #fff; border-color: #764ba2; box-shadow: none; }
+        .form-control:focus { background-color: #151522; color: #fff; border-color: #667eea; box-shadow: none; }
         hr { border-color: #3d3d5c; }
     </style>
 </head>
@@ -30,11 +30,12 @@ HTML_TEMPLATE = '''
     <div class="container py-5">
         <div class="text-center mb-5">
             <h1 class="text-white display-4 fw-bold">📈 AI 股神助手</h1>
-            <p class="text-muted lead">量化技術指標、名師策略審查與動態 K 線圖表</p>
+            <p class="text-muted lead">名師策略審查與動態 10日 K 線技術圖表</p>
         </div>
 
         <div class="row justify-content-center">
-            <div class="col-lg-10">
+            <div class="col-md-9 col-lg-8">
+                
                 <div class="card p-4 mb-4">
                     <form id="stockForm">
                         <div class="input-group input-group-lg">
@@ -44,19 +45,18 @@ HTML_TEMPLATE = '''
                     </form>
                 </div>
 
-                <div id="outputSection" class="row g-4" style="display: none;">
-                    <div class="col-md-7">
-                        <div class="card p-3">
-                            <h5 class="mb-3 text-info">📊 歷史技術 K 線圖 (近60交易日)</h5>
-                            <div id="chart"></div>
-                        </div>
+                <div id="outputSection" style="display: none;">
+                    
+                    <div class="card p-4 mb-4">
+                        <h5 class="mb-3 text-info">📊 歷史技術 K 線圖 (最近10個交易日)</h5>
+                        <div id="chart"></div>
                     </div>
-                    <div class="col-md-5">
-                        <div class="card p-3">
-                            <h5 class="mb-3 text-warning">📋 策略分析報告</h5>
-                            <div id="result" class="result-box"></div>
-                        </div>
+                    
+                    <div class="card p-4">
+                        <h5 class="mb-3 text-warning">📋 策略分析報告</h5>
+                        <div id="result" class="result-box"></div>
                     </div>
+
                 </div>
 
             </div>
@@ -73,9 +73,9 @@ HTML_TEMPLATE = '''
             const resultDiv = document.getElementById('result');
             const chartDiv = document.getElementById('chart');
             
-            outputSection.style.display = 'flex';
+            outputSection.style.display = 'block';
             resultDiv.innerHTML = '<p class="text-center text-muted">🔄 正在計算技術指標與大師策略...</p>';
-            chartDiv.innerHTML = '<p class="text-center text-muted">🔄 正在載入K線數據...</p>';
+            chartDiv.innerHTML = '<p class="text-center text-muted">🔄 正在載入近10日K線數據...</p>';
 
             try {
                 const res = await fetch('/analyze', {
@@ -92,13 +92,12 @@ HTML_TEMPLATE = '''
                     return;
                 }
 
-                // 1. 渲染右側文字報告
+                // 1. 渲染文字報告
                 resultDiv.innerHTML = data.report;
 
-                // 2. 轉換 K 線數據（將日期轉成純時間戳記，避免任何時區造成的空白臭蟲）
-                const chartData = data.k_data.map(item => {
+                // 2. 重組 K 線價格數據
+                const candlestickData = data.k_data.map(item => {
                     const parts = item.date.split('-');
-                    // 使用 UTC 時間戳記確保不論在什麼瀏覽器下都能精準對齊天數
                     const timestamp = Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
                     return {
                         x: timestamp,
@@ -106,45 +105,58 @@ HTML_TEMPLATE = '''
                     };
                 });
 
-                // 3. 設定 ApexCharts 參數
+                // 3. 重組 EMA20 均線數據
+                const emaData = data.k_data.map(item => {
+                    const parts = item.date.split('-');
+                    const timestamp = Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                    return {
+                        x: timestamp,
+                        y: item.ema20
+                    };
+                });
+
+                // 4. 配置混合圖表 (K線 + EMA均線)
                 const options = {
-                    series: [{
-                        name: 'K線',
-                        data: chartData
-                    }],
+                    series: [
+                        {
+                            name: 'K線價',
+                            type: 'candlestick',
+                            data: candlestickData
+                        },
+                        {
+                            name: 'EMA(20)趨勢線',
+                            type: 'line',
+                            data: emaData
+                        }
+                    ],
                     chart: {
-                        type: 'candlestick',
-                        height: 400,
+                        type: 'line',
+                        height: 380,
                         background: '#1e1e2f',
-                        foreColor: '#cccccc', // 確保圖表字體顏色清晰
+                        foreColor: '#cccccc',
                         toolbar: { show: true }
-                    },
-                    noData: {
-                        text: '⚠️ 無法載入圖表數據',
-                        align: 'center',
-                        verticalAlign: 'middle',
-                        style: { color: '#ef5350', fontSize: '16px' }
                     },
                     xaxis: { 
                         type: 'datetime',
-                        labels: { datetimeUTC: true } // 強制使用 UTC 格式呈現
+                        labels: { datetimeUTC: true }
                     },
                     yaxis: { 
-                        tooltip: { enabled: true },
                         decimalsInFloat: 2
                     },
+                    stroke: {
+                        width: [1, 2.5] // K線框粗細, EMA線粗細
+                    },
+                    colors: ['#ef5350', '#ff9800'], // 均線顯示為亮橘色
                     plotOptions: {
                         candlestick: {
                             colors: {
-                                upward: '#ef5350',  // 台灣看盤習慣：上漲為紅
-                                downward: '#26a69a' // 台灣看盤習慣：下跌為綠
-                            },
-                            wick: { useFillColor: true } // 讓影線顏色也同步變更
+                                upward: '#ef5350',  // 漲紅
+                                downward: '#26a69a' // 跌綠
+                            }
                         }
                     }
                 };
 
-                // 4. 銷毀舊圖表並繪製新圖表
                 if (chartInstance) {
                     chartInstance.destroy();
                 }
@@ -154,7 +166,7 @@ HTML_TEMPLATE = '''
 
             } catch (err) {
                 resultDiv.innerHTML = `<p class="text-danger">連線失敗: ${err}</p>`;
-                chartDiv.innerHTML = '<p class="text-center text-danger">數據渲染失敗</p>';
+                chartDiv.innerHTML = '<p class="text-center text-danger">圖表組件載入異常</p>';
             }
         });
     </script>
@@ -194,8 +206,8 @@ def get_stock_analysis_report(symbol):
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.dropna(inplace=True)
 
-        # 擷取最近 60 天的交易資料
-        k_df = df.tail(60).copy()
+        # 【精準切換】：僅擷取最新「10天」的資料傳回前端，防止畫面擁擠
+        k_df = df.tail(10).copy()
         k_data_list = []
         for index, row in k_df.iterrows():
             k_data_list.append({
@@ -203,7 +215,8 @@ def get_stock_analysis_report(symbol):
                 'open': round(float(row['Open']), 2),
                 'high': round(float(row['High']), 2),
                 'low': round(float(row['Low']), 2),
-                'close': round(float(row['Close']), 2)
+                'close': round(float(row['Close']), 2),
+                'ema20': round(float(row['EMA_20']), 2)
             })
 
         # 純數學線性趨勢預測
@@ -223,33 +236,35 @@ def get_stock_analysis_report(symbol):
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 產生報告 HTML
+        # 產生報告 HTML 內容
         report = f"""
-        💰 <strong>目前價格：</strong> {current_price:.2f}<br>
-        🤖 <strong>趨勢預測下日：</strong> {pred_price:.2f} 
+        📊 <strong>股票代碼：</strong> {symbol}<br>
+        💰 <strong>當前價格：</strong> {current_price:.2f}<br>
+        🤖 <strong>AI 趨勢預測下個交易日：</strong> {pred_price:.2f} 
         <span style="color:{'#ef5350' if change_pct > 0 else '#26a69a'}">({change_pct:+.2f}%)</span>
+        <hr>
+        <h4>五大名師看法：</h4>
         """
 
         masters = [
             ("👴 巴菲特", "價格合理", "價格太貴", buffett),
             ("🎩 李佛摩", "趨勢向上", "趨勢不明", livermore),
             ("👓 彼得・林區", "動能強勁", "進入整理", lynch),
-            ("🚀 凱薩琳・伍德", "具爆發力", "成長緩慢", wood),
+            ("🚀 凱薩琳 * 伍德", "具爆發力", "成長緩慢", wood),
             ("💻 詹姆斯 * 西蒙斯", "數據勝率高", "數據勝率低", simons),
         ]
 
-        report += "<hr><h6>五大名師短評：</h6>"
         recommendation = 0
         for name, good, bad, result in masters:
             status = f"✅ {good}" if result else f"❌ {bad}"
             color = "#ef5350" if result else "#26a69a"
-            report += f"<p style='margin-bottom:5px;'><strong>{name}：</strong> <span style='color:{color}'>{status}</span></p>"
+            report += f"<p><strong>{name}：</strong> <span style='color:{color}'>{status}</span></p>"
             if result: recommendation += 1
 
-        report += f"<hr><h6>💡 綜合建議：{recommendation}/5 看好</h6>"
-        if recommendation >= 4: report += "<h4 style='color:#ef5350'>🔥 強力買入指標！</h4>"
-        elif recommendation == 3: report += "<h4 style='color:orange'>⚖️ 考慮分批進場</h4>"
-        else: report += "<h4 style='color:gray'>💤 建議繼續觀望</h4>"
+        report += f"<hr><h4>💡 綜合建議：{recommendation}/5 位大師看好</h4>"
+        if recommendation >= 4: report += "<h3 style='color:#ef5350'>🔥 強力買入指標！</h3>"
+        elif recommendation == 3: report += "<h3 style='color:orange'>⚖️ 可以考慮分批進場</h3>"
+        else: report += "<h3 style='color:gray'>💤 建議繼續觀望</h3>"
 
         return k_data_list, report
 
