@@ -6,7 +6,6 @@ import requests
 
 app = Flask(__name__)
 
-# 單一檔案網頁範本 (上下結構，確保圖表100%顯示，鎖定近10日K線)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -46,7 +45,6 @@ HTML_TEMPLATE = '''
                 </div>
 
                 <div id="outputSection" style="display: none;">
-                    
                     <div class="card p-4 mb-4">
                         <h5 class="mb-3 text-info">📊 歷史技術 K 線圖 (最近10個交易日)</h5>
                         <div id="chart"></div>
@@ -56,7 +54,6 @@ HTML_TEMPLATE = '''
                         <h5 class="mb-3 text-warning">📋 策略分析報告</h5>
                         <div id="result" class="result-box"></div>
                     </div>
-
                 </div>
 
             </div>
@@ -87,15 +84,13 @@ HTML_TEMPLATE = '''
                 const data = await res.json();
                 
                 if (data.error) {
-                    resultDiv.innerHTML = `<h4 class="text-danger">錯誤</h4><p>${data.error}</p>`;
-                    chartDiv.innerHTML = '<p class="text-center text-danger">無法載入圖表</p>';
+                    resultDiv.innerHTML = `<h4 class="text-danger">📊 分析失敗</h4><p>${data.error}</p>`;
+                    chartDiv.innerHTML = '<p class="text-center text-danger">⚠️ 無法載入圖表數據</p>';
                     return;
                 }
 
-                // 1. 渲染文字報告
                 resultDiv.innerHTML = data.report;
 
-                // 2. 重組 K 線價格數據
                 const candlestickData = data.k_data.map(item => {
                     const parts = item.date.split('-');
                     const timestamp = Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
@@ -105,7 +100,6 @@ HTML_TEMPLATE = '''
                     };
                 });
 
-                // 3. 重組 EMA20 均線數據
                 const emaData = data.k_data.map(item => {
                     const parts = item.date.split('-');
                     const timestamp = Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
@@ -115,19 +109,10 @@ HTML_TEMPLATE = '''
                     };
                 });
 
-                // 4. 配置混合圖表 (K線 + EMA均線)
                 const options = {
                     series: [
-                        {
-                            name: 'K線價',
-                            type: 'candlestick',
-                            data: candlestickData
-                        },
-                        {
-                            name: 'EMA(20)趨勢線',
-                            type: 'line',
-                            data: emaData
-                        }
+                        { name: 'K線價', type: 'candlestick', data: candlestickData },
+                        { name: 'EMA(20)趨勢線', type: 'line', data: emaData }
                     ],
                     chart: {
                         type: 'line',
@@ -136,30 +121,18 @@ HTML_TEMPLATE = '''
                         foreColor: '#cccccc',
                         toolbar: { show: true }
                     },
-                    xaxis: { 
-                        type: 'datetime',
-                        labels: { datetimeUTC: true }
-                    },
-                    yaxis: { 
-                        decimalsInFloat: 2
-                    },
-                    stroke: {
-                        width: [1, 2.5] // K線框粗細, EMA線粗細
-                    },
-                    colors: ['#ef5350', '#ff9800'], // 均線顯示為亮橘色
+                    xaxis: { type: 'datetime', labels: { datetimeUTC: true } },
+                    yaxis: { decimalsInFloat: 2 },
+                    stroke: { width: [1, 2.5] },
+                    colors: ['#ef5350', '#ff9800'],
                     plotOptions: {
                         candlestick: {
-                            colors: {
-                                upward: '#ef5350',  // 漲紅
-                                downward: '#26a69a' // 跌綠
-                            }
+                            colors: { upward: '#ef5350', downward: '#26a69a' }
                         }
                     }
                 };
 
-                if (chartInstance) {
-                    chartInstance.destroy();
-                }
+                if (chartInstance) { chartInstance.destroy(); }
                 chartDiv.innerHTML = '';
                 chartInstance = new ApexCharts(chartDiv, options);
                 chartInstance.render();
@@ -174,7 +147,6 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
-# ==================== 純手寫技術指標函數 ====================
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -184,29 +156,38 @@ def calculate_rsi(series, period=14):
     rs = avg_gain / (avg_loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
-# ==================== 股票分析核心函數 ====================
 def get_stock_analysis_report(symbol):
     try:
+        # 強大偽裝 Session 機制
         session = requests.Session()
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
         })
 
-        df = yf.download(symbol, period="2y", auto_adjust=True, progress=False, session=session)
+        # 雲端環境將 period 放寬到 3y，確保留白與指標計算安全
+        df = yf.download(symbol, period="3y", auto_adjust=True, progress=False, session=session)
         
+        if df is None or df.empty:
+            return None, f"Yahoo 財經未回傳 「{symbol}」 的數據。若為台股請確保加上尾綴（如：2330.TW）。"
+
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        if df.empty or len(df) < 200:
-            return None, f"❌ 找不到股票代碼 {symbol} 或資料不足 (需至少200個交易日)"
+        if len(df) < 210:
+            return None, f"股票代碼 {symbol} 的歷史交易日數據不足 (現有 {len(df)} 天，需 200 天以上以計算長天期均線)"
 
-        # 技術指標計算
+        # 指標安全計算
         df['RSI'] = calculate_rsi(df['Close'], period=14)
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.dropna(inplace=True)
 
-        # 【精準切換】：僅擷取最新「10天」的資料傳回前端，防止畫面擁擠
+        if len(df) < 10:
+            return None, "數據經清洗後數量不足以提供 10 日線圖呈現。"
+
+        # 擷取最新 10 天
         k_df = df.tail(10).copy()
         k_data_list = []
         for index, row in k_df.iterrows():
@@ -219,7 +200,7 @@ def get_stock_analysis_report(symbol):
                 'ema20': round(float(row['EMA_20']), 2)
             })
 
-        # 純數學線性趨勢預測
+        # 線性趨勢
         close_prices = df['Close'].tail(20).values
         x = np.arange(len(close_prices))
         y = close_prices
@@ -229,14 +210,12 @@ def get_stock_analysis_report(symbol):
         current_price = df['Close'].iloc[-1]
         change_pct = ((pred_price - current_price) / current_price) * 100
 
-        # 大師判斷邏輯
         buffett = current_price < df['SMA_200'].iloc[-1] * 1.15
         livermore = (current_price > df['EMA_20'].iloc[-1]) and (change_pct > 0)
         lynch = 50 < df['RSI'].iloc[-1] < 75
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
-        # 產生報告 HTML 內容
         report = f"""
         📊 <strong>股票代碼：</strong> {symbol}<br>
         💰 <strong>當前價格：</strong> {current_price:.2f}<br>
@@ -250,8 +229,8 @@ def get_stock_analysis_report(symbol):
             ("👴 巴菲特", "價格合理", "價格太貴", buffett),
             ("🎩 李佛摩", "趨勢向上", "趨勢不明", livermore),
             ("👓 彼得・林區", "動能強勁", "進入整理", lynch),
-            ("🚀 凱薩琳 * 伍德", "具爆發力", "成長緩慢", wood),
-            ("💻 詹姆斯 * 西蒙斯", "數據勝率高", "數據勝率低", simons),
+            ("🚀 凱薩琳 ・ 伍德", "具爆發力", "成長緩慢", wood),
+            ("💻 詹姆斯 ・ 西蒙斯", "數據勝率高", "數據勝率低", simons),
         ]
 
         recommendation = 0
@@ -269,7 +248,8 @@ def get_stock_analysis_report(symbol):
         return k_data_list, report
 
     except Exception as e:
-        return None, f"❌ 分析過程中發生錯誤: {str(e)}"
+        # 將真實的錯誤拋給外部，不要再用假訊息掩蓋
+        return None, f"系統執行核心邏輯時崩潰: {str(e)}"
 
 # ==================== 網站路由 ====================
 
@@ -284,6 +264,8 @@ def analyze():
         return jsonify({'error': '請輸入股票代碼'})
     
     k_data, report = get_stock_analysis_report(symbol)
+    
+    # 核心安全修正：如果後端抓取或計算出錯，直接把真實錯誤包成 JSON 回傳給前端，不盲目往下走
     if k_data is None:
         return jsonify({'error': report})
         
