@@ -6,7 +6,7 @@ import requests
 
 app = Flask(__name__)
 
-# 單一檔案網頁範本
+# 單一檔案網頁範本 (已完全修復前端繪圖時區與時間格式問題)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -20,7 +20,7 @@ HTML_TEMPLATE = '''
         body { background: linear-gradient(135deg, #1e1e2f, #2d1b4e); color: #f4f4f7; min-height: 100vh; }
         .card { background-color: #252538; border: none; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); color: #f4f4f7; }
         .result-box { background: #1e1e2f; border-radius: 12px; padding: 25px; border: 1px solid #3d3d5c; }
-        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 400px; }
+        #chart { background: #1e1e2f; border-radius: 12px; padding: 15px; border: 1px solid #3d3d5c; min-height: 430px; }
         .form-control { background-color: #151522; border: 1px solid #3d3d5c; color: #fff; }
         .form-control:focus { background-color: #151522; color: #fff; border-color: #764ba2; box-shadow: none; }
         hr { border-color: #3d3d5c; }
@@ -92,36 +92,59 @@ HTML_TEMPLATE = '''
                     return;
                 }
 
-                // 1. 渲染文字報告
+                // 1. 渲染右側文字報告
                 resultDiv.innerHTML = data.report;
 
-                // 2. 解析後端傳來的 K 線 JSON 數據
-                const chartData = data.k_data.map(item => ({
-                    x: new Date(item.date),
-                    y: [item.open, item.high, item.low, item.close]
-                }));
+                // 2. 轉換 K 線數據（將日期轉成純時間戳記，避免任何時區造成的空白臭蟲）
+                const chartData = data.k_data.map(item => {
+                    const parts = item.date.split('-');
+                    // 使用 UTC 時間戳記確保不論在什麼瀏覽器下都能精準對齊天數
+                    const timestamp = Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                    return {
+                        x: timestamp,
+                        y: [item.open, item.high, item.low, item.close]
+                    };
+                });
 
-                // 3. 繪製或更新 ApexCharts K線圖
+                // 3. 設定 ApexCharts 參數
                 const options = {
-                    series: [{ data: chartData }],
+                    series: [{
+                        name: 'K線',
+                        data: chartData
+                    }],
                     chart: {
                         type: 'candlestick',
                         height: 400,
                         background: '#1e1e2f',
+                        foreColor: '#cccccc', // 確保圖表字體顏色清晰
                         toolbar: { show: true }
                     },
-                    xaxis: { type: 'datetime' },
-                    yaxis: { tooltip: { enabled: true }, decimalsInFloat: 2 },
+                    noData: {
+                        text: '⚠️ 無法載入圖表數據',
+                        align: 'center',
+                        verticalAlign: 'middle',
+                        style: { color: '#ef5350', fontSize: '16px' }
+                    },
+                    xaxis: { 
+                        type: 'datetime',
+                        labels: { datetimeUTC: true } // 強制使用 UTC 格式呈現
+                    },
+                    yaxis: { 
+                        tooltip: { enabled: true },
+                        decimalsInFloat: 2
+                    },
                     plotOptions: {
                         candlestick: {
                             colors: {
-                                upward: '#ef5350',
-                                downward: '#26a69a'
-                            }
+                                upward: '#ef5350',  // 台灣看盤習慣：上漲為紅
+                                downward: '#26a69a' // 台灣看盤習慣：下跌為綠
+                            },
+                            wick: { useFillColor: true } // 讓影線顏色也同步變更
                         }
                     }
                 };
 
+                // 4. 銷毀舊圖表並繪製新圖表
                 if (chartInstance) {
                     chartInstance.destroy();
                 }
@@ -131,7 +154,7 @@ HTML_TEMPLATE = '''
 
             } catch (err) {
                 resultDiv.innerHTML = `<p class="text-danger">連線失敗: ${err}</p>`;
-                chartDiv.innerHTML = '<p class="text-center text-danger">無法連線到主機</p>';
+                chartDiv.innerHTML = '<p class="text-center text-danger">數據渲染失敗</p>';
             }
         });
     </script>
@@ -171,16 +194,16 @@ def get_stock_analysis_report(symbol):
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.dropna(inplace=True)
 
-        # 擷取最近 60 天用來畫前端 K 線圖
+        # 擷取最近 60 天的交易資料
         k_df = df.tail(60).copy()
         k_data_list = []
         for index, row in k_df.iterrows():
             k_data_list.append({
                 'date': index.strftime('%Y-%m-%d'),
-                'open': float(row['Open']),
-                'high': float(row['High']),
-                'low': float(row['Low']),
-                'close': float(row['Close'])
+                'open': round(float(row['Open']), 2),
+                'high': round(float(row['High']), 2),
+                'low': round(float(row['Low']), 2),
+                'close': round(float(row['Close']), 2)
             })
 
         # 純數學線性趨勢預測
@@ -212,7 +235,7 @@ def get_stock_analysis_report(symbol):
             ("🎩 李佛摩", "趨勢向上", "趨勢不明", livermore),
             ("👓 彼得・林區", "動能強勁", "進入整理", lynch),
             ("🚀 凱薩琳・伍德", "具爆發力", "成長緩慢", wood),
-            ("💻 詹姆斯・西蒙斯", "數據勝率高", "數據勝率低", simons),
+            ("💻 詹姆斯 * 西蒙斯", "數據勝率高", "數據勝率低", simons),
         ]
 
         report += "<hr><h6>五大名師短評：</h6>"
