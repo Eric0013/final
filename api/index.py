@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -6,7 +6,6 @@ import requests
 
 app = Flask(__name__)
 
-# 100% 原始紫色排版，副標題已修正，用來驗證 Vercel 有沒有更新成功
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -25,7 +24,7 @@ HTML_TEMPLATE = '''
     <div class="container py-5">
         <div class="text-center mb-5">
             <h1 class="text-white display-4">📈 AI 股神助手</h1>
-            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 (已更新名稱與幣別機制)</p>
+            <p class="text-white lead">輸入股票代碼，獲得五大名師量化數據分析 <span class="badge bg-success text-white">v2.2 Final</span></p>
         </div>
 
         <div class="row justify-content-center">
@@ -57,8 +56,7 @@ HTML_TEMPLATE = '''
             resultDiv.innerHTML = '<p class="text-center">🔄 正在計算技術指標與大師策略，請稍候...</p>';
 
             try {
-                // 智慧安全防禦：如果後端 Vercel 又被鎖 IP，前端直接用使用者本地 IP 去抓 Yahoo 補體
-                const response = await fetch('/analyze', {
+                const response = await fetch('/analyze?t=' + new Date().getTime(), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `symbol=${encodeURIComponent(symbol)}`
@@ -67,50 +65,12 @@ HTML_TEMPLATE = '''
                 const data = await response.json();
                 
                 if (data.error) {
-                    // 觸發前端本地解鎖機制，完全免疫被鎖 IP 的地雷
-                    resultDiv.innerHTML = '<p class="text-center">🔄 Vercel 雲端繁忙，正在切換至本地安全通道計算大師報告...</p>';
-                    const backupUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d`;
-                    const r = await fetch(backupUrl);
-                    const yData = await r.json();
-                    const resObj = yData.chart.result[0];
-                    
-                    const name = resObj.meta.shortName || symbol;
-                    const currency = symbol.includes('.TW') ? 'TWD' : 'USD';
-                    const closes = resObj.indicators.adjclose[0].adjclose.filter(c => c != null);
-                    const currentPrice = closes[closes.length - 1];
-                    
-                    // 快速趨勢預測
-                    const tail20 = closes.slice(-20);
-                    let sumX=0, sumY=0, sumXY=0, sumXX=0, n=tail20.length;
-                    for(let i=0; i<n; i++){
-                        sumX += i; sumY += tail20[i]; sumXY += i*tail20[i]; sumXX += i*i;
-                    }
-                    let slope = (n*sumXY - sumX*sumY) / (n*sumXX - sumX*sumX);
-                    let intercept = (sumY - slope*sumX) / n;
-                    let predPrice = slope * 20 + intercept;
-                    let changePct = ((predPrice - currentPrice) / currentPrice) * 100;
-
-                    resultDiv.innerHTML = `
-                        <h4 class="mb-3">分析結果 - ${symbol}</h4>
-                        📊 <strong>股票名稱：</strong> ${name} (${symbol})<br>
-                        💰 <strong>當前價格：</strong> ${currentPrice.toFixed(2)} ${currency}<br>
-                        🤖 <strong>AI 趨勢預測下個交易日：</strong> ${predPrice.toFixed(2)} ${currency} 
-                        <span style="color:${change_pct > 0 ? 'green' : 'red'}">(${change_pct > 0 ? '+' : ''}${change_pct.toFixed(2)}%)</span>
-                        <hr>
-                        <h4>五大名師看法：</h4>
-                        <p><strong>👴 巴菲特：</strong> <span style="color:green">✅ 價格合理</span></p>
-                        <p><strong>🎩 李佛摩：</strong> <span style="color:${change_pct > 0 ? 'green' : 'red'}">${change_pct > 0 ? '✅ 趨勢向上' : '❌ 趨勢不明'}</span></p>
-                        <p><strong>👓 彼得・林區：</strong> <span style="color:green">✅ 動能強勁</span></p>
-                        <p><strong>🚀 凱薩琳・伍德：</strong> <span style="color:${change_pct > 3 ? 'green' : 'red'}">${change_pct > 3 ? '✅ 具爆發力' : '❌ 成長緩慢'}</span></p>
-                        <p><strong>💻 詹姆斯 * 西蒙斯：</strong> <span style="color:green">✅ 數據勝率高</span></p>
-                        <hr><h4>💡 綜合建議：大師指標解析成功</h4>
-                        <h3 style="color:orange">⚖️ 可以考慮分批進場</h3>
-                    `;
+                    resultDiv.innerHTML = `<h4 class="mb-3 text-danger">分析失敗</h4><p>${data.error}</p>`;
                 } else {
                     resultDiv.innerHTML = `<h4 class="mb-3">分析結果 - ${data.symbol}</h4>${data.report}`;
                 }
             } catch (err) {
-                resultDiv.innerHTML = `<h4 class="mb-3 text-danger">錯誤</h4><p>網路封包回傳異常，請重試。</p>`;
+                resultDiv.innerHTML = `<h4 class="mb-3 text-danger">錯誤</h4><p>伺服器連線異常，請確認代碼後重試。</p>`;
             }
         });
     </script>
@@ -127,6 +87,7 @@ def calculate_rsi(series, period=14):
     rs = avg_gain / (avg_loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
+# ==================== 核心大師分析邏輯 ====================
 def get_stock_analysis_report(symbol):
     try:
         df = None
@@ -143,7 +104,7 @@ def get_stock_analysis_report(symbol):
             df = None
 
         if df is None or df.empty:
-            backup_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=2y&interval=1d"
+            backup_url = f"https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d"
             r = requests.get(backup_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
             result = r.json()['chart']['result'][0]
             timestamps = result['timestamp']
@@ -163,21 +124,29 @@ def get_stock_analysis_report(symbol):
 
         currency = "TWD" if ".TW" in symbol.upper() else "USD"
 
+        # 計算原始指標
         df['RSI'] = calculate_rsi(df['Close'], period=14)
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df.dropna(inplace=True)
 
+        # 線性預測公式
         close_prices = df['Close'].tail(20).values
         x = np.arange(len(close_prices))
         slope, intercept = np.polyfit(x, close_prices, 1)
         pred_price = slope * 20 + intercept
-        current_price = df['Close'].iloc[-1]
-        change_pct = ((pred_price - current_price) / current_price) * 100
+        current_price = float(df['Close'].iloc[-1])
+        change_pct = float(((pred_price - current_price) / current_price) * 100)
 
-        buffett = current_price < df['SMA_200'].iloc[-1] * 1.15
-        livermore = (current_price > df['EMA_20'].iloc[-1]) and (change_pct > 0)
-        lynch = 50 < df['RSI'].iloc[-1] < 75
+        # 💡 修正關鍵：強制將最後一筆的均線數值轉為純 float 數值，徹底避免 Series 比較引發的 ambiguous 異常
+        last_sma200 = float(df['SMA_200'].iloc[-1])
+        last_ema20 = float(df['EMA_20'].iloc[-1])
+        last_rsi = float(df['RSI'].iloc[-1])
+
+        # 大師判斷邏輯
+        buffett = current_price < last_sma200 * 1.15
+        livermore = (current_price > last_ema20) and (change_pct > 0)
+        lynch = 50 < last_rsi < 75
         wood = change_pct > 3.0
         simons = change_pct > 0.5
 
@@ -217,7 +186,9 @@ def get_stock_analysis_report(symbol):
 
 @app.route('/')
 def home():
-    return HTML_TEMPLATE
+    response = make_response(HTML_TEMPLATE)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -225,7 +196,10 @@ def analyze():
     if not symbol:
         return jsonify({'error': '請輸入股票代碼'})
     report = get_stock_analysis_report(symbol)
-    return jsonify({'report': report, 'symbol': symbol})
+    
+    response = make_response(jsonify({'report': report, 'symbol': symbol}))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
